@@ -1,0 +1,123 @@
+# Build the Actual sync-server image from this fork and push it to GHCR for
+# the Unraid host (wolverine, x86_64).
+#
+# This is a fork-only workflow; upstream's docker-nightly/docker-release
+# workflows target Depot runners and Docker Hub and are disabled here.
+# It is a separate file (not an edit to upstream's) so syncing upstream never
+# conflicts with it.
+#
+# Built for linux/amd64 only — a local `docker build` on the Apple Silicon Mac
+# would produce an arm64 image Unraid can't run, which is why the build lives here.
+#
+# Pushed tags:
+#   ghcr.io/<owner>/actual-server:latest      — tracks master (Watchtower on
+#                                               wolverine deploys it automatically)
+#   ghcr.io/<owner>/actual-server:sha-<hash>  — immutable, for rollback
+#
+# See deploy/unraid/README.md for the Unraid side.
+name: unraid-image
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - packages/docs/**
+      - upcoming-release-notes/**
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: unraid-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Build the web client + server on the runner, then copy the output into
+      # the image (same approach as upstream's Docker workflows).
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          # Don't restore caches into a job that publishes an image.
+          cache: 'false'
+          # English only: skip checking out actualbudget/translations at an
+          # unpinned HEAD.
+          download-translations: 'false'
+
+      - name: Build server
+        run: yarn build:server
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/actual-server
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build image for testing
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: packages/sync-server/docker/ubuntu.Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: actual-server-testing
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test that the image boots
+        timeout-minutes: 2
+        run: |
+          docker run --detach --name actual-server actual-server-testing
+          until docker exec actual-server node scripts/health-check.js; do sleep 2; done
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs actual-server || true
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reuses the layers from the test build above; nothing is rebuilt.
+      - name: Build and push image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: packages/sync-server/docker/ubuntu.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Pushed image"
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+            echo "Watchtower on wolverine picks up \`:latest\` on its next poll."
+          } >> "$GITHUB_STEP_SUMMARY"
