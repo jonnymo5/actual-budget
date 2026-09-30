@@ -25,6 +25,11 @@ machine (`actual`) with a real Let's Encrypt certificate, without exposing
 anything to the internet or the LAN. Every device that uses Actual (Mac,
 phone) needs the Tailscale app, signed in to the same tailnet.
 
+The sidecar reaches Actual by container name (`http://actual-server:5006`)
+over the stack's private Docker network; actual-server publishes no ports.
+The same pattern works for any other app: add a tailscale service to its
+stack and point the serve config's `Proxy` at that app's container and port.
+
 ## One-time setup
 
 ### 1. Tailscale admin console
@@ -105,9 +110,8 @@ state lives in `/mnt/maincache/appdata/actual-budget/tailscale`.
 - **Pause auto-updates**: set the actual-server label to
   `com.centurylinklabs.watchtower.enable=false` and Compose Up.
 - **Update Tailscale**: it is pinned by version and digest and never
-  auto-updated. Bump the tag + digest in the compose file, then Compose Down →
-  Up. Use Down → Up (not just Up) so both containers are recreated together:
-  actual-server lives in tailscale's network namespace.
+  auto-updated. Bump the tag + digest in the compose file, then Compose Up.
+  Only the tailscale container is recreated; Actual keeps running.
 - **Backups**: cover `/mnt/maincache/appdata/actual-budget/data` with Unraid's
   appdata backup plugin. For a single budget, Actual can also export a zip
   from **Settings → Export data**.

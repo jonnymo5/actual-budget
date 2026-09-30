@@ -1,9 +1,9 @@
 # Actual Budget — Unraid deployment (host: wolverine), via Compose Manager.
 #
-# Two containers share one network namespace:
+# Two containers on the stack's private network:
 #   tailscale      joins the tailnet as "actual" and serves
 #                  https://actual.<tailnet>.ts.net with a real certificate,
-#                  proxying to Actual on 127.0.0.1:5006
+#                  proxying to http://actual-server:5006 by container name
 #   actual-server  the sync server + web app, built from this fork by
 #                  .github/workflows/unraid-image.yml
 #
@@ -11,10 +11,13 @@
 # (HTTPS) anywhere other than localhost, so plain http://wolverine.local:5006
 # would not work anyway — every device uses the tailnet URL.
 #
+# Same pattern for any app: add a tailscale service next to it and point the
+# serve config's Proxy at the app's container name and port.
+#
 # Updates: Watchtower (its own stack, from the jonnymo5/watchtower fork) only
 # touches containers labelled com.centurylinklabs.watchtower.enable=true.
-# actual-server is labelled; tailscale is deliberately NOT — recreating it
-# would pull the network out from under actual-server.
+# actual-server is labelled. tailscale is pinned by version + digest and
+# updated by hand, so it is explicitly opted out.
 #
 # Storage: bind-mounts under /mnt/maincache/appdata — the DIRECT cache-disk
 # path, deliberately NOT /mnt/user/appdata. Actual keeps its data in SQLite,
@@ -40,6 +43,8 @@ services:
     configs:
       - source: ts-serve
         target: /config/serve.json
+    depends_on:
+      - actual-server
     labels:
       - com.centurylinklabs.watchtower.enable=false
     restart: unless-stopped
@@ -47,10 +52,8 @@ services:
   actual-server:
     image: ghcr.io/jonnymo5/actual-server:latest
     container_name: actual-server
-    network_mode: service:tailscale
-    depends_on:
-      - tailscale
     user: '99:100' # Unraid's nobody:users, so appdata files have normal ownership
+    # No `ports:` — only reachable from this stack's network (i.e. tailscale).
     volumes:
       - /mnt/maincache/appdata/actual-budget/data:/data
     # Config options: https://actualbudget.org/docs/config/
@@ -67,7 +70,7 @@ services:
     restart: unless-stopped
 
 configs:
-  # tailscale serve: HTTPS on :443 -> Actual on 127.0.0.1:5006, tailnet only.
+  # tailscale serve: HTTPS on :443 -> actual-server:5006, tailnet only.
   # `$$` escapes compose interpolation; containerboot fills in TS_CERT_DOMAIN.
   ts-serve:
     content: |
@@ -75,7 +78,7 @@ configs:
         "TCP": { "443": { "HTTPS": true } },
         "Web": {
           "$${TS_CERT_DOMAIN}:443": {
-            "Handlers": { "/": { "Proxy": "http://127.0.0.1:5006" } }
+            "Handlers": { "/": { "Proxy": "http://actual-server:5006" } }
           }
         },
         "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": false }
