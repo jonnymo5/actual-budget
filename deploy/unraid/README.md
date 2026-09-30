@@ -86,8 +86,11 @@ With the **Compose Manager** plugin:
    while the certificate is issued.
 5. Set the server password on first visit, then create or import a budget.
 
-The auth key can be deleted from `.env` after the first login; Tailscale's
-state lives in `/mnt/maincache/appdata/actual-budget/tailscale`.
+After the first login, delete `TS_AUTHKEY` from `.env`; Tailscale keeps its
+login in `/mnt/maincache/appdata/actual-budget/tailscale`, and the stack starts
+fine without the key. If that folder is ever lost, the container starts but
+stays logged out (`docker logs actual-tailscale` shows `NeedsLogin`): generate
+a new auth key, put it back in `.env`, and Compose Up.
 
 ## Day-2 operations
 

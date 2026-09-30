@@ -23,8 +23,9 @@
 # path, deliberately NOT /mnt/user/appdata. Actual keeps its data in SQLite,
 # and Unraid's /mnt/user FUSE layer (shfs) has file-locking quirks with SQLite.
 #
-# Secrets: put TS_AUTHKEY in a .env file next to this compose file on
-# wolverine (never commit it). Setup steps: see README.md in this directory.
+# Secrets: for the first start, put TS_AUTHKEY in a .env file next to this
+# compose file on wolverine (never commit it), and remove it once tailscale has
+# logged in. Setup steps: see README.md in this directory.
 #
 # Requires Docker Compose v2.23+ (inline `configs.content`).
 
@@ -34,8 +35,9 @@ services:
     container_name: actual-tailscale
     hostname: actual # tailnet machine name -> https://actual.<tailnet>.ts.net
     environment:
-      # Only used for the first login; state is persisted in TS_STATE_DIR.
-      - TS_AUTHKEY=${TS_AUTHKEY:?set TS_AUTHKEY in .env next to this file}
+      # Only needed for the first login; after that the login is kept in
+      # TS_STATE_DIR, so the key can be removed from .env.
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_SERVE_CONFIG=/config/serve.json
     volumes:
