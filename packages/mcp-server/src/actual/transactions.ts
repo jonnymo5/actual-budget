@@ -85,7 +85,10 @@ const SELECTED_FIELDS = [
 
 const MAX_SUGGESTIONS = 15;
 
-async function assertKnownAccount(ctx: ActualContext, accountId: string) {
+export async function assertKnownAccount(
+  ctx: ActualContext,
+  accountId: string,
+) {
   const accounts = await ctx.api.getAccounts();
   if (accounts.some(account => account.id === accountId)) return;
 
@@ -99,7 +102,7 @@ async function assertKnownAccount(ctx: ActualContext, accountId: string) {
 
 // Matching is on the budget's own category list rather than interpolated into
 // the query, so only ids that really exist ever reach ActualQL.
-async function resolveCategoryIds(
+export async function resolveCategoryIds(
   ctx: ActualContext,
   category: string,
 ): Promise<string[]> {

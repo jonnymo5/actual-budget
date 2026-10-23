@@ -2,7 +2,6 @@ import { z } from 'zod';
 
 import { getAccountsWithBalances } from './accounts';
 import type { AccountSummary, AccountsWithBalances } from './accounts';
-import { todayIso } from './amounts';
 import { getCategoryGroups } from './categories';
 import { queryRows } from './query';
 import type { ActualContext } from './session';
@@ -74,7 +73,7 @@ export async function buildOverview(ctx: ActualContext): Promise<Overview> {
 
   return {
     budget_name: ctx.budget.name,
-    today: todayIso(),
+    today: ctx.today(),
     decimal_places: ctx.amounts.decimalPlaces,
     server_version: await getServerVersion(ctx),
     sync: {

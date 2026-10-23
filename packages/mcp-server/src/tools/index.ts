@@ -1,3 +1,9 @@
+import { cashFlowProjection } from './analysis/cash-flow-projection';
+import { detectRecurringTool } from './analysis/detect-recurring';
+import { findOutliersTool } from './analysis/find-outliers';
+import { monthComparison } from './analysis/month-comparison';
+import { spendingSummary } from './analysis/spending-summary';
+import { spendingTrends } from './analysis/spending-trends';
 import { getBudgetMonth } from './query/get-budget-month';
 import { getBudgetMonths } from './query/get-budget-months';
 import { getCategories } from './query/get-categories';
@@ -22,4 +28,10 @@ export const allTools: ToolDefinition[] = [
   getSchedules,
   getRules,
   runQuery,
+  spendingSummary,
+  spendingTrends,
+  findOutliersTool,
+  detectRecurringTool,
+  cashFlowProjection,
+  monthComparison,
 ];

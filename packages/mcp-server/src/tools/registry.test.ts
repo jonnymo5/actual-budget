@@ -16,6 +16,7 @@ const context: ActualContext = {
   amounts: createAmountConverter('USD'),
   budget: { id: 'b', name: 'Test' },
   syncStatus: () => ({ lastSyncedAt: null, lastError: null }),
+  today: () => '2026-01-15',
 };
 
 function createRecordingSession() {

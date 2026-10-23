@@ -1,6 +1,6 @@
 import * as api from '@actual-app/api';
 
-import { createAmountConverter } from './amounts';
+import { createAmountConverter, todayIso } from './amounts';
 import type { AmountConverter } from './amounts';
 import { createMutex } from './mutex';
 import { createSyncController, DEFAULT_SYNC_INTERVAL_MS } from './sync';
@@ -17,6 +17,8 @@ export type ActualContext = {
   amounts: AmountConverter;
   budget: { id: string; name: string };
   syncStatus: () => SyncStatus;
+  /** Today's date as `YYYY-MM-DD`, from the session's clock. */
+  today: () => string;
 };
 
 export type AccessKind = 'read' | 'write';
@@ -107,6 +109,7 @@ export function createSession({
       amounts: createAmountConverter(prefs.defaultCurrencyCode),
       budget: { id: budgetId, name: budgetName },
       syncStatus: syncController.status,
+      today: () => todayIso(new Date(now())),
     };
   }
 

@@ -12,6 +12,7 @@
   "type": "module",
   "imports": {
     "#actual/*": "./src/actual/*.ts",
+    "#analysis/*": "./src/analysis/*.ts",
     "#config": "./src/config.ts",
     "#errors": "./src/errors.ts",
     "#log": "./src/log.ts",

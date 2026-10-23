@@ -31,7 +31,7 @@ export type ScheduleSummary = {
   recurrence: Recurrence;
 };
 
-const recurSchema = z.object({
+export const recurSchema = z.object({
   frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
   interval: z.number().nullish(),
   patterns: z
@@ -45,7 +45,7 @@ const recurSchema = z.object({
   weekendSolveMode: z.enum(['before', 'after']).nullish(),
 });
 
-const rawScheduleSchema = z.object({
+export const rawScheduleSchema = z.object({
   id: z.string(),
   name: z.string().nullish(),
   next_date: z.string().nullish(),

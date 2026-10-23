@@ -64,9 +64,18 @@ export type TestBudget = {
   dispose: () => Promise<void>;
 };
 
-export async function createTestBudget(): Promise<TestBudget> {
+export async function createTestBudget({
+  today,
+}: {
+  /** Freezes the session's clock at noon on this `YYYY-MM-DD` day. */
+  today?: string;
+} = {}): Promise<TestBudget> {
   const { hooks, syncCount, dispose } = await createTestHooks();
-  const session = createSession({ ...hooks, retryDelaysMs: [] });
+  const session = createSession({
+    ...hooks,
+    retryDelaysMs: [],
+    ...(today ? { now: () => new Date(`${today}T12:00:00`).getTime() } : {}),
+  });
   return {
     session,
     use: fn => session.run('read', fn),
