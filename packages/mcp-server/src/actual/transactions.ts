@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { toolError } from '#errors';
 
 import { queryRows } from './query';
+import type { AqlQuery } from './query';
 import type { ActualContext } from './session';
 
 export type TransactionFilters = {
@@ -136,7 +137,7 @@ export async function resolveCategoryIds(
 // ActualQL escapes string values but inlines values compared with an id field
 // as-is, so caller text must never reach an id comparison unless it cannot
 // contain a quote. Real ids are uuid-like, so only id-shaped text is tried.
-const ID_SHAPED = /^[\w-]{1,64}$/;
+export const ID_SHAPED = /^[\w-]{1,64}$/;
 
 // Matches when the text appears in any of `likeFields` (case-insensitive), or
 // equals the value of any of `idFields`.
@@ -187,15 +188,29 @@ export async function queryTransactions(
   ];
   // Splits are read inline: each split line is a row and the parent is left
   // out, so amounts are never counted twice.
-  const matching = ctx.api.q('transactions').filter({ $and: conditions });
+  return readTransactionPage(
+    ctx,
+    ctx.api.q('transactions').filter({ $and: conditions }),
+    { limit: filters.limit, offset: filters.offset },
+  );
+}
 
+/**
+ * One page of the transactions a filtered query matches, newest first, with
+ * the count and net sum over every match.
+ */
+export async function readTransactionPage(
+  ctx: ActualContext,
+  matching: AqlQuery,
+  { limit, offset }: { limit: number; offset: number },
+): Promise<TransactionPage> {
   const rows = await queryRows(
     ctx,
     matching
       .select(SELECTED_FIELDS)
       .orderBy([{ date: 'desc' }, 'id'])
-      .limit(filters.limit)
-      .offset(filters.offset),
+      .limit(limit)
+      .offset(offset),
     rawRowSchema,
   );
   const [totals] = await queryRows(
@@ -225,7 +240,7 @@ export async function queryTransactions(
     })),
     total_count: count,
     total_amount: ctx.amounts.toMajor(total ?? 0),
-    offset: filters.offset,
-    has_more: filters.offset + rows.length < count,
+    offset,
+    has_more: offset + rows.length < count,
   };
 }

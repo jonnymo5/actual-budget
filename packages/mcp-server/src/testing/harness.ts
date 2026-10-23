@@ -39,9 +39,9 @@ export async function createTestHooks(): Promise<TestHooks> {
   return {
     hooks: {
       async connect() {
-        await api.init({ dataDir, verbose: false });
+        const lootCore = await api.init({ dataDir, verbose: false });
         await api.loadBudget(BUDGET_ID);
-        return { budgetId: BUDGET_ID, budgetName: BUDGET_NAME };
+        return { budgetId: BUDGET_ID, budgetName: BUDGET_NAME, lootCore };
       },
       async sync() {
         syncs++;

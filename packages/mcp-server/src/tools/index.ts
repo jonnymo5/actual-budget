@@ -4,6 +4,9 @@ import { findOutliersTool } from './analysis/find-outliers';
 import { monthComparison } from './analysis/month-comparison';
 import { spendingSummary } from './analysis/spending-summary';
 import { spendingTrends } from './analysis/spending-trends';
+import { categorizeTransactions } from './categorize/categorize-transactions';
+import { getUncategorized } from './categorize/get-uncategorized';
+import { updateTransaction } from './categorize/update-transaction';
 import { getBudgetMonth } from './query/get-budget-month';
 import { getBudgetMonths } from './query/get-budget-months';
 import { getCategories } from './query/get-categories';
@@ -15,6 +18,11 @@ import { getTransactions } from './query/get-transactions';
 import { listAccounts } from './query/list-accounts';
 import { runQuery } from './query/run-query';
 import type { ToolDefinition } from './registry';
+import { applyRulesRetroactively } from './rules/apply-rules-retroactively';
+import { createRule } from './rules/create-rule';
+import { deleteRule } from './rules/delete-rule';
+import { previewRule } from './rules/preview-rule';
+import { updateRule } from './rules/update-rule';
 
 /** Every tool the server can offer; the registry decides which to expose. */
 export const allTools: ToolDefinition[] = [
@@ -34,4 +42,12 @@ export const allTools: ToolDefinition[] = [
   detectRecurringTool,
   cashFlowProjection,
   monthComparison,
+  getUncategorized,
+  categorizeTransactions,
+  updateTransaction,
+  previewRule,
+  createRule,
+  updateRule,
+  deleteRule,
+  applyRulesRetroactively,
 ];

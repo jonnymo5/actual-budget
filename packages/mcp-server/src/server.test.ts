@@ -12,9 +12,10 @@ afterAll(async () => {
   await budget.dispose();
 });
 
-// Every tool the server offers today. Adding a tool means adding it here, and
-// to one of the lists below, so its description is held to the same standard.
-const TOOLS = [
+// Every tool the server offers today. Adding a tool means adding it to one of
+// these two lists, and to the lists below, so its description is held to the
+// same standard.
+const READ_TOOLS = [
   'cash_flow_projection',
   'detect_recurring',
   'find_outliers',
@@ -26,16 +27,35 @@ const TOOLS = [
   'get_rules',
   'get_schedules',
   'get_transactions',
+  'get_uncategorized',
   'list_accounts',
   'month_comparison',
+  'preview_rule',
   'run_query',
   'spending_summary',
   'spending_trends',
 ];
 
+// Tools that can change the budget. They are dry-run by default, and absent in
+// read-only mode.
+const WRITE_TOOLS = [
+  'apply_rules_retroactively',
+  'categorize_transactions',
+  'create_rule',
+  'delete_rule',
+  'update_rule',
+  'update_transaction',
+];
+
+const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].sort();
+
 // Tools whose results include money must say it is in major units.
 const REPORT_MONEY = [
+  'apply_rules_retroactively',
   'cash_flow_projection',
+  'categorize_transactions',
+  'create_rule',
+  'delete_rule',
   'detect_recurring',
   'find_outliers',
   'get_budget_month',
@@ -43,16 +63,23 @@ const REPORT_MONEY = [
   'get_rules',
   'get_schedules',
   'get_transactions',
+  'get_uncategorized',
   'list_accounts',
   'month_comparison',
+  'preview_rule',
   'run_query',
   'spending_summary',
   'spending_trends',
+  'update_rule',
+  'update_transaction',
 ];
 
 // Tools that take or return dates must say how they are written.
 const REPORT_DATES: Record<string, RegExp> = {
+  apply_rules_retroactively: /YYYY-MM-DD/,
   cash_flow_projection: /YYYY-MM-DD/,
+  create_rule: /YYYY-MM-DD/,
+  delete_rule: /YYYY-MM-DD/,
   detect_recurring: /YYYY-MM-DD/,
   find_outliers: /YYYY-MM-DD/,
   get_budget_month: /YYYY-MM/,
@@ -61,14 +88,18 @@ const REPORT_DATES: Record<string, RegExp> = {
   get_rules: /YYYY-MM-DD/,
   get_schedules: /YYYY-MM-DD/,
   get_transactions: /YYYY-MM-DD/,
+  get_uncategorized: /YYYY-MM-DD/,
   month_comparison: /YYYY-MM/,
+  preview_rule: /YYYY-MM-DD/,
   run_query: /YYYY-MM-DD/,
   spending_summary: /YYYY-MM-DD/,
   spending_trends: /YYYY-MM/,
+  update_rule: /YYYY-MM-DD/,
+  update_transaction: /YYYY-MM-DD/,
 };
 
 describe('the tools on offer', () => {
-  it('are the query and analysis tools, and all of them still show up in read-only mode', async () => {
+  it('are every tool, and in read-only mode only the ones that cannot change anything', async () => {
     for (const readOnly of [false, true]) {
       const { client, close } = await connectTestClient({
         session: budget.session,
@@ -76,12 +107,14 @@ describe('the tools on offer', () => {
       });
       const { tools } = await client.listTools();
 
-      expect(tools.map(tool => tool.name).sort()).toEqual(TOOLS);
+      expect(tools.map(tool => tool.name).sort()).toEqual(
+        readOnly ? [...READ_TOOLS].sort() : TOOLS,
+      );
       await close();
     }
   });
 
-  it('are all read-only and describe what they return', async () => {
+  it('describe what they return, and say which of them change data', async () => {
     const { client, close } = await connectTestClient({
       session: budget.session,
     });
@@ -90,9 +123,20 @@ describe('the tools on offer', () => {
     for (const tool of tools) {
       expect(tool.title, tool.name).toBeTruthy();
       expect(tool.description, tool.name).toBeTruthy();
-      expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
       expect(tool.outputSchema, tool.name).toBeDefined();
       expect(tool.name, tool.name).toMatch(/^[a-z]+(_[a-z]+)*$/);
+
+      const writes = WRITE_TOOLS.includes(tool.name);
+      expect(tool.annotations?.readOnlyHint, tool.name).toBe(!writes);
+      const properties = tool.inputSchema.properties ?? {};
+      expect('dry_run' in properties, tool.name).toBe(writes);
+      expect(tool.description, tool.name).toMatch(
+        writes ? /Dry run by default/ : /^(?!.*Dry run by default)/s,
+      );
+      // Only a deletion asks for confirmation as well.
+      expect('confirm' in properties, tool.name).toBe(
+        tool.name === 'delete_rule',
+      );
     }
     await close();
   });

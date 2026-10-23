@@ -16,7 +16,7 @@ async function openConfiguredBudget(config: ConnectionConfig) {
   // The API requires the data directory to exist already.
   await mkdir(config.dataDir, { recursive: true });
 
-  await api.init({
+  const lootCore = await api.init({
     dataDir: config.dataDir,
     serverURL: config.serverUrl,
     password: config.serverPassword,
@@ -43,7 +43,7 @@ async function openConfiguredBudget(config: ConnectionConfig) {
       `Downloaded the budget but could not find it on disk for sync id ${config.syncId}.`,
     );
   }
-  return { budgetId: match.id, budgetName: match.name };
+  return { budgetId: match.id, budgetName: match.name, lootCore };
 }
 
 // Errors from the API name the reason but not the server, which makes

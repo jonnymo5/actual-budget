@@ -139,6 +139,9 @@ function renderValue(
     }
   }
 
+  // "category is empty" is how a rule says "has no category yet".
+  if (value === null) return { value: null, text: 'empty' };
+
   const label = (item: unknown): string => {
     if (typeof item === 'string' && field !== null && isNamedField(field)) {
       return names[field].get(item) ?? item;
@@ -230,6 +233,52 @@ function summarizeRule(
   }, then ${actions.map(describeAction).join('; ') || 'do nothing'}`;
 
   return { id: raw.id, stage, match, conditions, actions, summary };
+}
+
+/** A rule without an id: one that has not been saved yet. */
+export type RuleBody = Omit<RuleSummary, 'id'>;
+
+type UnsavedRule = {
+  stage: 'pre' | 'default' | 'post' | null;
+  conditionsOp: 'and' | 'or';
+  conditions: unknown[];
+  actions: unknown[];
+};
+
+/** Describes a rule that does not exist yet, in the same words as `get_rules`. */
+export async function describeRule(
+  ctx: ActualContext,
+  rule: UnsavedRule,
+): Promise<RuleBody> {
+  const { id: _id, ...body } = summarizeRule(
+    ctx,
+    await loadNames(ctx),
+    ruleSchema.parse({ id: 'unsaved', ...rule }),
+  );
+  return body;
+}
+
+/**
+ * One rule as the API stores it, plus its description. Rules that belong to a
+ * schedule are refused: Actual keeps them in step with the schedule.
+ */
+export async function loadRule(ctx: ActualContext, ruleId: string) {
+  const stored = (await ctx.api.getRules()).find(rule => rule.id === ruleId);
+  if (!stored) {
+    throw toolError(
+      `unknown rule_id "${ruleId}". Use get_rules to list the rules and their ids.`,
+    );
+  }
+  const parsed = ruleSchema.parse(stored);
+  if (parsed.actions.some(action => action.op === 'link-schedule')) {
+    throw toolError(
+      `rule "${ruleId}" is the one Actual keeps behind a schedule, so it cannot be changed directly. Change the schedule instead (get_schedules lists them).`,
+    );
+  }
+  return {
+    stored,
+    summary: summarizeRule(ctx, await loadNames(ctx), parsed),
+  };
 }
 
 /**

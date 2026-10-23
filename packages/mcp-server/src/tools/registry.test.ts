@@ -13,6 +13,11 @@ import type { ToolRunContext } from './registry';
 // just records how each call asked for access.
 const context: ActualContext = {
   api,
+  lootCore: {
+    send: async () => {
+      throw new Error('this test has no budget');
+    },
+  },
   amounts: createAmountConverter('USD'),
   budget: { id: 'b', name: 'Test' },
   syncStatus: () => ({ lastSyncedAt: null, lastError: null }),

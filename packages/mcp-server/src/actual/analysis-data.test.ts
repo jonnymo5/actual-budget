@@ -61,22 +61,27 @@ describe('loadAnalysisTransactions', () => {
       });
     });
 
-    expect(rows.map(row => [row.date, row.payee, row.amount])).toEqual([
+    // The two split lines share a date and are told apart only by their random
+    // ids, so their order is not fixed: compare them smallest amount first.
+    const ordered = [...rows].sort(
+      (a, b) => a.date.localeCompare(b.date) || a.amount - b.amount,
+    );
+    expect(ordered.map(row => [row.date, row.payee, row.amount])).toEqual([
       ['2029-03-02', 'Earlier', -2000],
       ['2029-03-05', 'Split Shop', -3000],
       ['2029-03-05', 'Split Shop', -2000],
       ['2029-03-09', 'Later', -3000],
     ]);
-    expect(rows[0]).toMatchObject({
+    expect(ordered[0]).toMatchObject({
       account: 'Checking',
       account_off_budget: false,
       category: 'Test Food',
       category_is_income: false,
       is_transfer: false,
     });
-    expect(rows[0].category_group).toBeTruthy();
+    expect(ordered[0].category_group).toBeTruthy();
     // The split line with no category stays uncategorized.
-    expect(rows[2].category_id).toBeNull();
+    expect(ordered[2].category_id).toBeNull();
   });
 
   it('calls a category income when only its group says so', async () => {

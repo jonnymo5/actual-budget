@@ -9,11 +9,24 @@ import type { SyncStatus } from './sync';
 export type ActualApi = typeof api;
 
 /**
+ * loot-core's own message handlers, as `init` hands them back. They are
+ * reached through here rather than `api.internal`, which is `null` for a
+ * program that imported the API before calling `init`.
+ */
+export type LootCore = Pick<NonNullable<ActualApi['internal']>, 'send'>;
+
+/**
  * Everything a tool handler may touch. It only exists inside `Session.run`, so
  * a handler cannot reach the Actual API without holding the mutex.
  */
 export type ActualContext = {
   api: ActualApi;
+  /**
+   * For the few things the public API does not offer (the filter a rule's
+   * conditions make) or does badly: its `updateTransaction` returns before its
+   * write has finished, whereas `transactions-batch-update` is awaited.
+   */
+  lootCore: LootCore;
   amounts: AmountConverter;
   budget: { id: string; name: string };
   syncStatus: () => SyncStatus;
@@ -38,7 +51,11 @@ export type Session = {
 
 export type SessionHooks = {
   /** Initialises the API and opens the budget; returns what was opened. */
-  connect: () => Promise<{ budgetId: string; budgetName: string }>;
+  connect: () => Promise<{
+    budgetId: string;
+    budgetName: string;
+    lootCore: LootCore;
+  }>;
   sync: () => Promise<void>;
   shutdown: () => Promise<void>;
 };
@@ -102,10 +119,11 @@ export function createSession({
   let hardFailure: { message: string; at: number } | null = null;
 
   async function openOnce(): Promise<ActualContext> {
-    const { budgetId, budgetName } = await connect();
+    const { budgetId, budgetName, lootCore } = await connect();
     const prefs = await api.getPreferences();
     return {
       api,
+      lootCore,
       amounts: createAmountConverter(prefs.defaultCurrencyCode),
       budget: { id: budgetId, name: budgetName },
       syncStatus: syncController.status,
