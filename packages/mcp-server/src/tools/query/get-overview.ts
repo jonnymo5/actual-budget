@@ -7,7 +7,7 @@ export const getOverview = defineTool({
   name: 'get_overview',
   title: 'Budget overview',
   description:
-    "Orient yourself: call this first. Returns the budget name, today's date, accounts with current balances, how much transaction history exists (first and last transaction dates), the category groups with their category names, and whether the data is in sync with the server. Amounts are in major currency units (e.g. dollars, not cents); spending is negative. Dates are YYYY-MM-DD.",
+    "Orient yourself: call this first. Returns the budget name, today's date, accounts with current balances, how much transaction history exists (first and last transaction dates), the visible category groups with their category names (hidden ones are left out; get_categories can include them), and whether the data is in sync with the server. Amounts are in major currency units (e.g. dollars, not cents); spending is negative. Dates are YYYY-MM-DD.",
   kind: 'read',
   input: {},
   output: {
@@ -55,7 +55,6 @@ export const getOverview = defineTool({
       z.object({
         name: z.string(),
         is_income: z.boolean(),
-        hidden: z.boolean(),
         categories: z.array(z.string()),
       }),
     ),
@@ -85,7 +84,7 @@ export const getOverview = defineTool({
       'Category groups:',
       ...overview.category_groups.map(
         group =>
-          `- ${group.name}${group.is_income ? ' (income)' : ''}${group.hidden ? ' (hidden)' : ''}: ${group.categories.join(', ') || 'no categories'}`,
+          `- ${group.name}${group.is_income ? ' (income)' : ''}: ${group.categories.join(', ') || 'no categories'}`,
       ),
     ];
 

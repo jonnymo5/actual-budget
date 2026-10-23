@@ -1,142 +1,27 @@
 import { z } from 'zod';
 
-import type { ActualContext } from '#actual/session';
 import { transactionRowSchema } from '#actual/transactions';
 import { connectTestClient } from '#testing/client';
+import { EXPECTED, seedFixture } from '#testing/fixture';
 import { createTestBudget } from '#testing/harness';
 import type { TestBudget } from '#testing/harness';
 
 // One seeded budget serves every test in this file; they only read from it.
-//
-// Checking: the template's 1000.00 starting balance, then the rows below.
-//   1000.00 - 85.50 - 42.25 - 15.99 + 2500.00 - 120.00 - 9.99 - 30.00
-//   = 3196.27
-// Savings: 500.00 opening - 200.00 transferred out = 300.00
-// Brokerage (off budget): 2500.00 opening + 200.00 transferred in = 2700.00
-// Old Card: closed, 0.00
-const EXPECTED = {
-  checking: 3196.27,
-  savings: 300,
-  brokerage: 2700,
-  onBudget: 3496.27,
-  offBudget: 2700,
-  all: 6196.27,
-  // Everything dated 2026-09-01..2026-10-31: seven Checking rows plus both
-  // sides of the Savings -> Brokerage transfer.
-  septOctCount: 9,
-  septOctNet: 2196.27,
-};
-
 let budget: TestBudget;
 let ids: { checking: string; savings: string; brokerage: string; food: string };
 let connection: Awaited<ReturnType<typeof connectTestClient>>;
 
-async function categoryId(ctx: ActualContext, name: string) {
-  const category = (await ctx.api.getCategories()).find(c => c.name === name);
-  if (!category) throw new Error(`template has no category ${name}`);
-  return category.id;
-}
-
-async function seed(ctx: ActualContext) {
-  const { api, amounts } = ctx;
-  const money = amounts.toMinor;
-
-  const [checking] = await api.getAccounts();
-  const savings = await api.createAccount({ name: 'Savings' });
-  const brokerage = await api.createAccount({
-    name: 'Brokerage',
-    offbudget: true,
-  });
-  // Closing an account that has no transactions deletes it, so give it some
-  // history that nets to zero (closing needs a zero balance).
-  const oldCard = await api.createAccount({ name: 'Old Card' });
-  await api.addTransactions(oldCard, [
-    { date: '2025-01-01', amount: money(50), notes: 'Opening balance' },
-    { date: '2025-06-01', amount: money(-50), notes: 'Paid off' },
-  ]);
-  await api.closeAccount(oldCard);
-
-  // Enough categories that an unknown-category error has to cut its list.
-  const extras = await api.createCategoryGroup({ name: 'Extras' });
-  for (let n = 1; n <= 12; n++) {
-    await api.createCategory({ name: `Extra ${n}`, group_id: extras });
-  }
-
-  const food = await categoryId(ctx, 'Food');
-  const bills = await categoryId(ctx, 'Bills');
-  const general = await categoryId(ctx, 'General');
-  // Accounts made through the API get a transfer payee; the template's own
-  // Checking account predates them, so transfers start from Savings instead.
-  const transferToBrokerage = (await api.getPayees()).find(
-    payee => payee.transfer_acct === brokerage,
-  );
-  if (!transferToBrokerage) throw new Error('no transfer payee for Brokerage');
-
-  await api.addTransactions(
-    savings,
-    [
-      { date: '2026-01-01', amount: money(500), notes: 'Opening balance' },
-      {
-        date: '2026-09-15',
-        amount: money(-200),
-        payee: transferToBrokerage.id,
-      },
-    ],
-    { runTransfers: true },
-  );
-  await api.addTransactions(brokerage, [
-    { date: '2026-01-01', amount: money(2500), notes: 'Opening balance' },
-  ]);
-  await api.addTransactions(checking.id, [
-    {
-      date: '2026-09-03',
-      amount: money(-85.5),
-      payee_name: 'Costco',
-      category: food,
-      notes: 'weekly groceries',
-      cleared: false,
-    },
-    {
-      date: '2026-09-10',
-      amount: money(-42.25),
-      payee_name: 'Costco',
-      category: food,
-    },
-    {
-      date: '2026-09-12',
-      amount: money(-15.99),
-      payee_name: 'Netflix',
-      category: bills,
-      cleared: true,
-    },
-    { date: '2026-09-20', amount: money(2500), payee_name: 'Employer' },
-    {
-      date: '2026-10-02',
-      amount: money(-120),
-      payee_name: 'Costco',
-      category: general,
-      notes: 'bulk party supplies',
-    },
-    {
-      date: '2026-10-05',
-      amount: money(-9.99),
-      payee_name: 'Mystery Vendor',
-    },
-    {
-      date: '2026-10-08',
-      amount: money(-30),
-      payee_name: 'Amazon',
-      imported_payee: 'AMZN MKTP US*2K4',
-      category: general,
-    },
-  ]);
-
-  return { checking: checking.id, savings, brokerage, food };
-}
-
 beforeAll(async () => {
   budget = await createTestBudget();
-  ids = await budget.use(seed);
+  ids = await budget.use(async ctx => {
+    const fixture = await seedFixture(ctx);
+    return {
+      checking: fixture.accounts.checking,
+      savings: fixture.accounts.savings,
+      brokerage: fixture.accounts.brokerage,
+      food: fixture.categories.food,
+    };
+  });
   connection = await connectTestClient({ session: budget.session });
 });
 
@@ -181,50 +66,7 @@ const pageSchema = z.object({
   offset: z.number(),
   has_more: z.boolean(),
 });
-const contentSchema = z.array(
-  z.object({ type: z.string(), text: z.string().optional() }),
-);
-
-async function call(name: string, args: Json = {}) {
-  const result = await connection.client.callTool({ name, arguments: args });
-  const text = contentSchema
-    .parse(result.content)
-    .map(block => block.text ?? '')
-    .join('\n');
-  return { result, text, data: result.structuredContent };
-}
-
-describe('server', () => {
-  it('offers the three query tools, including in read-only mode', async () => {
-    const readOnly = await connectTestClient({
-      session: budget.session,
-      readOnly: true,
-    });
-    const { tools } = await readOnly.client.listTools();
-
-    expect(tools.map(tool => tool.name).sort()).toEqual([
-      'get_overview',
-      'get_transactions',
-      'list_accounts',
-    ]);
-    await readOnly.close();
-  });
-
-  it('tells the model the conventions up front', () => {
-    expect(connection.client.getInstructions()).toMatch(/get_overview first/);
-    expect(connection.client.getInstructions()).toMatch(/dollars, not cents/);
-  });
-
-  it('states units and date formats in every tool description', async () => {
-    const { tools } = await connection.client.listTools();
-
-    for (const tool of tools) {
-      expect(tool.description, tool.name).toMatch(/major currency units/);
-    }
-    const transactions = tools.find(tool => tool.name === 'get_transactions');
-    expect(transactions?.description).toMatch(/YYYY-MM-DD/);
-  });
-});
+const call = (name: string, args: Json = {}) => connection.call(name, args);
 
 describe('get_overview', () => {
   it('summarises the budget', async () => {
@@ -241,13 +83,15 @@ describe('get_overview', () => {
         all: EXPECTED.all,
       },
       transactions: {
-        count: 14,
-        first_date: '2019-02-06',
-        last_date: '2026-10-08',
+        count: EXPECTED.transactionCount,
+        first_date: EXPECTED.firstDate,
+        last_date: EXPECTED.lastDate,
       },
     });
     expect(text).toContain('Budget: Default Test Db');
-    expect(text).toContain('Transactions: 14 from 2019-02-06 to 2026-10-08');
+    expect(text).toContain(
+      `Transactions: ${EXPECTED.transactionCount} from ${EXPECTED.firstDate} to ${EXPECTED.lastDate}`,
+    );
   });
 
   it('lists open accounts with balances in major units', async () => {
@@ -276,6 +120,11 @@ describe('get_overview', () => {
     expect(withFood?.categories).toEqual(
       expect.arrayContaining(['Food', 'Bills', 'General']),
     );
+    // Hidden categories and groups are left out of the overview.
+    const listed = groups.flatMap(group => group.categories);
+    expect(listed).not.toContain('Retired Extra');
+    expect(listed).not.toContain('Old Hobby');
+    expect(groups.map(group => group.name)).not.toContain('Archive');
   });
 
   it("reports today's date, server version and sync state", async () => {
@@ -412,6 +261,40 @@ describe('get_transactions', () => {
     expect(page(byBankText.data).total_amount).toBe(-30);
     expect(page(byName.data).total_amount).toBe(-30);
   });
+
+  it("finds payees whose names contain an apostrophe, like Trader Joe's", async () => {
+    const { result, data, text } = await call('get_transactions', {
+      start_date: '2026-08-01',
+      end_date: '2026-08-31',
+      payee: "joe's",
+    });
+
+    expect(result.isError, text).toBeFalsy();
+    expect(page(data).transactions.map(t => t.payee)).toEqual(["Trader Joe's"]);
+  });
+
+  it.each([
+    ['payee', { payee: "x' OR '1'='1" }],
+    ['search_text', { search_text: "x') OR 1=1 --" }],
+    ['category', { category: "x' OR '1'='1" }],
+  ])(
+    'treats quotes in %s as plain text, not as query syntax',
+    async (_param, filter) => {
+      const { result, data, text } = await call('get_transactions', {
+        ...septOct,
+        ...filter,
+      });
+
+      // Anything that leaked into the query would match every row, or error.
+      if ('category' in filter) {
+        expect(result.isError).toBe(true);
+        expect(text).toContain('unknown category');
+      } else {
+        expect(result.isError, text).toBeFalsy();
+        expect(page(data).total_count).toBe(0);
+      }
+    },
+  );
 
   it('filters by payee id', async () => {
     const { data: all } = await call('get_transactions', {

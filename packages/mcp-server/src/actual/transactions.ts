@@ -130,18 +130,24 @@ async function resolveCategoryIds(
   );
 }
 
+// ActualQL escapes string values but inlines values compared with an id field
+// as-is, so caller text must never reach an id comparison unless it cannot
+// contain a quote. Real ids are uuid-like, so only id-shaped text is tried.
+const ID_SHAPED = /^[\w-]{1,64}$/;
+
 // Matches when the text appears in any of `likeFields` (case-insensitive), or
-// equals the value of any of `idFields`. Both go through query parameters.
+// equals the value of any of `idFields`.
 function textMatch(
   likeFields: string[],
   text: string,
   idFields: string[] = [],
 ) {
   const trimmed = text.trim();
+  const matchesIds = ID_SHAPED.test(trimmed) ? idFields : [];
   return {
     $or: [
       ...likeFields.map(field => ({ [field]: { $like: `%${trimmed}%` } })),
-      ...idFields.map(field => ({ [field]: trimmed })),
+      ...matchesIds.map(field => ({ [field]: trimmed })),
     ],
   };
 }

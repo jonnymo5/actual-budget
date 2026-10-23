@@ -3,13 +3,13 @@ import { z } from 'zod';
 import { getAccountsWithBalances } from './accounts';
 import type { AccountSummary, AccountsWithBalances } from './accounts';
 import { todayIso } from './amounts';
+import { getCategoryGroups } from './categories';
 import { queryRows } from './query';
 import type { ActualContext } from './session';
 
-export type CategoryGroupSummary = {
+export type OverviewCategoryGroup = {
   name: string;
   is_income: boolean;
-  hidden: boolean;
   categories: string[];
 };
 
@@ -28,7 +28,7 @@ export type Overview = {
     first_date: string | null;
     last_date: string | null;
   };
-  category_groups: CategoryGroupSummary[];
+  category_groups: OverviewCategoryGroup[];
 };
 
 const dateRowSchema = z.object({ date: z.string() });
@@ -69,7 +69,7 @@ export async function buildOverview(ctx: ActualContext): Promise<Overview> {
     includeClosed: true,
   });
   const openAccounts = accounts.filter(account => !account.closed);
-  const groups = await ctx.api.getCategoryGroups();
+  const groups = await getCategoryGroups(ctx, { includeHidden: false });
   const syncStatus = ctx.syncStatus();
 
   return {
@@ -89,9 +89,8 @@ export async function buildOverview(ctx: ActualContext): Promise<Overview> {
     transactions: await getTransactionRange(ctx),
     category_groups: groups.map(group => ({
       name: group.name,
-      is_income: Boolean(group.is_income),
-      hidden: Boolean(group.hidden),
-      categories: (group.categories ?? []).map(category => category.name),
+      is_income: group.is_income,
+      categories: group.categories.map(category => category.name),
     })),
   };
 }
