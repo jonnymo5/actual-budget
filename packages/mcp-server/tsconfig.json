@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "customConditions": ["api"],
+    "types": ["vitest/globals", "node"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "dist-types",
+    "tsBuildInfoFile": "dist-types/.tsbuildinfo",
+    "plugins": [
+      {
+        "name": "typescript-strict-plugin",
+        "paths": ["."]
+      }
+    ]
+  },
+  "references": [
+    {
+      "path": "../loot-core"
+    },
+    {
+      "path": "../api"
+    }
+  ],
+  "include": ["src/**/*", "package.json"],
+  "exclude": ["node_modules", "dist", "dist-types", "coverage"]
+}

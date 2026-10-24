@@ -1,0 +1,51 @@
+{
+  "name": "@actual-app/mcp-server",
+  "version": "26.9.0",
+  "private": true,
+  "description": "MCP server that exposes an Actual Budget to Claude",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/actualbudget/actual.git",
+    "directory": "packages/mcp-server"
+  },
+  "type": "module",
+  "imports": {
+    "#actual/*": "./src/actual/*.ts",
+    "#analysis/*": "./src/analysis/*.ts",
+    "#config": "./src/config.ts",
+    "#errors": "./src/errors.ts",
+    "#log": "./src/log.ts",
+    "#server": "./src/server.ts",
+    "#testing/*": "./src/testing/*.ts",
+    "#tools/*": "./src/tools/*.ts",
+    "#transports/*": "./src/transports/*.ts"
+  },
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build --logLevel silent && node dist/index.js",
+    "test": "vitest --run",
+    "typecheck": "tsgo -b && tsc-strict"
+  },
+  "dependencies": {
+    "@actual-app/api": "workspace:*",
+    "@actual-app/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "date-fns": "^4.4.0",
+    "express": "^5.2.1",
+    "xml2js": "^0.6.2",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@actual-app/vite-plugin-peggy": "workspace:*",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
+    "@typescript/native-preview": "beta",
+    "typescript-strict-plugin": "^2.4.4",
+    "vite": "^8.1.5",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
