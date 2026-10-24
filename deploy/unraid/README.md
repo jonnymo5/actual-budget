@@ -16,6 +16,11 @@ push to master (jonnymo5/actual-budget)
 Never build the image locally on the Mac for wolverine — Apple Silicon
 produces arm64 images.
 
+The same stack also runs the MCP server (`actual-mcp`), which lets Claude work
+with the budget at `https://actual.<tailnet>.ts.net/mcp`. It is built and
+updated the same way, by `.github/workflows/unraid-mcp-image.yml`. See
+[Adding the MCP server](#adding-the-mcp-server).
+
 ## Why HTTPS via Tailscale
 
 Actual's web app needs a secure context (HTTPS) anywhere other than
@@ -92,6 +97,69 @@ fine without the key. If that folder is ever lost, the container starts but
 stays logged out (`docker logs actual-tailscale` shows `NeedsLogin`): generate
 a new auth key, put it back in `.env`, and Compose Up.
 
+## Adding the MCP server
+
+`actual-mcp` ([`packages/mcp-server`](../../packages/mcp-server/README.md)) is
+an MCP server that gives Claude Code and Claude Desktop access to the budget.
+It runs in this stack, signs in to `actual-server` like any other Actual client
+(over the private Docker network, by container name), and is published by the
+existing tailscale container at `https://actual.<tailnet>.ts.net/mcp`. That is
+the same tailnet machine, so there is no new Tailscale node, key or
+certificate, and like Actual it publishes no ports.
+
+If the stack is already running, do this once:
+
+1. **Image.** After the first successful run of the `unraid-mcp-image` workflow
+   (start it from the Actions tab if you don't want to wait for a push), open
+   https://github.com/users/jonnymo5/packages/container/actual-mcp/settings and
+   set visibility to **public**, for the same reason as in step 2 above: the
+   image contains nothing environment-specific.
+2. **Storage.**
+
+   ```sh
+   mkdir -p /mnt/maincache/appdata/actual-budget/mcp
+   chown -R 99:100 /mnt/maincache/appdata/actual-budget/mcp
+   ```
+
+   This folder is only the server's local copy of the budget; the master copy
+   stays in Actual's own data folder. It is disposable: if it is deleted, the
+   server downloads the budget again on its next start.
+
+3. **Settings.** Add these to the stack's `.env` (never commit it):
+
+   ```sh
+   ACTUAL_SERVER_PASSWORD=<the server password you set in Actual's web app>
+   ACTUAL_SYNC_ID=<Settings → Show advanced settings → Sync ID>
+   MCP_AUTH_TOKEN=<a random secret, e.g. from: openssl rand -hex 32>
+   # Only if the budget uses end-to-end encryption:
+   # ACTUAL_BUDGET_ENCRYPTION_PASSWORD=...
+   # Hide every tool that can change the budget:
+   # ACTUAL_MCP_READ_ONLY=1
+   ```
+
+   Without `MCP_AUTH_TOKEN`, anyone on the tailnet can read the budget and
+   make changes through the server, so set one. (Changes need a second call
+   with `dry_run: false` to apply, but that is a safety net against mistakes,
+   not a defence against another user.)
+
+4. **Start it.** Replace the stack's compose file with the updated
+   `docker-compose.yml` and Compose Up. The tailscale container is recreated
+   because its serve config gained the `/mcp` route (it stays logged in), and
+   `actual-mcp` starts.
+5. **Check it.** `docker ps` shows `actual-mcp` as healthy after a minute, and
+   `docker logs actual-mcp` ends with `Listening on http://0.0.0.0:3600/mcp`.
+   From a device on the tailnet, `curl -i https://actual.<tailnet>.ts.net/mcp`
+   answers `401` (token set) or `405` (no token). Both prove the route works;
+   a `404` or a timeout means the serve config did not update.
+6. **Connect Claude.** See
+   [Connecting clients](../../packages/mcp-server/README.md#connecting-clients).
+
+If the container logs `... is required`, a value is missing from `.env`. If it
+logs `Authentication failed`, the password or Sync ID is wrong; fix `.env` and
+Compose Up. After a failed login the server waits five minutes before trying
+again, to stay under Actual's login rate limit, so restart the container to
+retry immediately.
+
 ## Day-2 operations
 
 - **Update Actual**: push to `master` (or run the `unraid-image` workflow
@@ -105,13 +173,20 @@ a new auth key, put it back in `.env`, and Compose Up.
 
   (one-time: `git remote add upstream https://github.com/actualbudget/actual.git`).
   The push triggers a build like any other.
+
 - **Rollback**: Actual migrates its database on startup, so back up first (see
   below). Then pin the previous tag in the compose file —
   `image: ghcr.io/jonnymo5/actual-server:sha-<hash>` (tags are listed on the
   GHCR package page) — and Compose Up. Watchtower leaves pinned tags alone
   until you switch back to `:latest`.
 - **Pause auto-updates**: set the actual-server label to
-  `com.centurylinklabs.watchtower.enable=false` and Compose Up.
+  `com.centurylinklabs.watchtower.enable=false` and Compose Up. The same label
+  on `actual-mcp` pauses its updates separately.
+- **MCP server**: updated by the same push and Watchtower flow, as the image
+  `ghcr.io/jonnymo5/actual-mcp`. To roll back, pin
+  `ghcr.io/jonnymo5/actual-mcp:sha-<hash>` in the compose file. To rotate the
+  token, change `MCP_AUTH_TOKEN` in `.env`, Compose Up, and update the token in
+  each Claude client's configuration.
 - **Update Tailscale**: it is pinned by version and digest and never
   auto-updated. Bump the tag + digest in the compose file, then Compose Up.
   Only the tailscale container is recreated; Actual keeps running.

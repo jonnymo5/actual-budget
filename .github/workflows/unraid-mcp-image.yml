@@ -1,0 +1,138 @@
+# Build the Actual MCP server image from this fork and push it to GHCR for the
+# Unraid host (wolverine, x86_64).
+#
+# A sibling of unraid-image.yml (which builds the sync server) and, like it, a
+# fork-only workflow in a file of its own so syncing upstream never conflicts
+# with it. The MCP server is a small Node bundle, so unlike the sync-server
+# image it only needs the API and the MCP server built, not the web client.
+#
+# Built for linux/amd64 only; a local build on the Apple Silicon Mac would
+# produce an arm64 image Unraid can't run.
+#
+# Pushed tags:
+#   ghcr.io/<owner>/actual-mcp:latest      - tracks master (Watchtower on
+#                                            wolverine deploys it automatically)
+#   ghcr.io/<owner>/actual-mcp:sha-<hash>  - immutable, for rollback
+#
+# See deploy/unraid/README.md for the Unraid side and
+# packages/mcp-server/README.md for the server.
+name: unraid-mcp-image
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - packages/docs/**
+      - upcoming-release-notes/**
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: unraid-mcp-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          # Don't restore caches into a job that publishes an image.
+          cache: 'false'
+          # English only: skip checking out actualbudget/translations at an
+          # unpinned HEAD.
+          download-translations: 'false'
+
+      # The image only copies these bundles in (same approach as the sync-server image).
+      - name: Build API and MCP server
+        run: |
+          yarn build:api
+          yarn workspace @actual-app/mcp-server build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/actual-mcp
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build image for testing
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: packages/mcp-server/docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: actual-mcp-testing
+          cache-from: type=gha,scope=actual-mcp
+          cache-to: type=gha,scope=actual-mcp,mode=max
+
+      # No Actual server is running here, so the budget never opens; what is
+      # checked is that the bundle and its production dependencies load, and
+      # that the server answers over HTTP.
+      - name: Test that the image boots
+        timeout-minutes: 2
+        run: |
+          docker run --detach --name actual-mcp --publish 3600:3600 \
+            --env ACTUAL_SERVER_URL=http://127.0.0.1:1 \
+            --env ACTUAL_SERVER_PASSWORD=ci-placeholder \
+            --env ACTUAL_SYNC_ID=ci-placeholder \
+            actual-mcp-testing
+          until curl --silent --fail http://127.0.0.1:3600/healthz; do sleep 2; done
+          echo
+          curl --silent --fail --request POST http://127.0.0.1:3600/mcp \
+            --header 'content-type: application/json' \
+            --header 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"0.0.0"}}}' \
+            | tee /dev/stderr | grep --quiet '"name":"actual-budget"'
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs actual-mcp || true
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reuses the layers from the test build above; nothing is rebuilt.
+      - name: Build and push image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: packages/mcp-server/docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=actual-mcp
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Pushed image"
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+            echo "Watchtower on wolverine picks up \`:latest\` on its next poll."
+          } >> "$GITHUB_STEP_SUMMARY"

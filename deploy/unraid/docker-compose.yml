@@ -1,11 +1,17 @@
 # Actual Budget — Unraid deployment (host: wolverine), via Compose Manager.
 #
-# Two containers on the stack's private network:
+# Three containers on the stack's private network:
 #   tailscale      joins the tailnet as "actual" and serves
 #                  https://actual.<tailnet>.ts.net with a real certificate,
 #                  proxying to http://actual-server:5006 by container name
+#                  (and /mcp to the MCP server, see below)
 #   actual-server  the sync server + web app, built from this fork by
 #                  .github/workflows/unraid-image.yml
+#   actual-mcp     the MCP server (packages/mcp-server), which lets Claude read
+#                  and manage the budget. It talks to actual-server like any
+#                  other Actual client and is reachable at
+#                  https://actual.<tailnet>.ts.net/mcp. Built by
+#                  .github/workflows/unraid-mcp-image.yml
 #
 # No ports are published on the LAN. Actual's web app needs a secure context
 # (HTTPS) anywhere other than localhost, so plain http://wolverine.local:5006
@@ -16,8 +22,8 @@
 #
 # Updates: Watchtower (its own stack, from the jonnymo5/watchtower fork) only
 # touches containers labelled com.centurylinklabs.watchtower.enable=true.
-# actual-server is labelled. tailscale is pinned by version + digest and
-# updated by hand, so it is explicitly opted out.
+# actual-server and actual-mcp are labelled. tailscale is pinned by version +
+# digest and updated by hand, so it is explicitly opted out.
 #
 # Storage: bind-mounts under /mnt/maincache/appdata — the DIRECT cache-disk
 # path, deliberately NOT /mnt/user/appdata. Actual keeps its data in SQLite,
@@ -25,7 +31,8 @@
 #
 # Secrets: for the first start, put TS_AUTHKEY in a .env file next to this
 # compose file on wolverine (never commit it), and remove it once tailscale has
-# logged in. Setup steps: see README.md in this directory.
+# logged in. actual-mcp reads its settings from the same .env (see its service
+# below). Setup steps: see README.md in this directory.
 #
 # Requires Docker Compose v2.23+ (inline `configs.content`).
 
@@ -71,8 +78,41 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  actual-mcp:
+    image: ghcr.io/jonnymo5/actual-mcp:latest
+    container_name: actual-mcp
+    user: '99:100' # same as actual-server, so the data folder is owned normally
+    # No `ports:` — only reachable from this stack's network (i.e. tailscale).
+    environment:
+      # Where the sync server is, by container name. These come from .env:
+      # ACTUAL_SERVER_PASSWORD is the password you set in Actual's web app,
+      # ACTUAL_SYNC_ID is under Settings > Show advanced settings > Sync ID.
+      # An empty value starts the container, which then logs what is missing.
+      - ACTUAL_SERVER_URL=http://actual-server:5006
+      - ACTUAL_SERVER_PASSWORD=${ACTUAL_SERVER_PASSWORD:-}
+      - ACTUAL_SYNC_ID=${ACTUAL_SYNC_ID:-}
+      # Only if the budget has end-to-end encryption on.
+      - ACTUAL_BUDGET_ENCRYPTION_PASSWORD=${ACTUAL_BUDGET_ENCRYPTION_PASSWORD:-}
+      # Without a token anyone on the tailnet can use the server (the tailnet
+      # is the only protection). With one, clients must send it as
+      # `Authorization: Bearer <token>`. At least 16 characters, e.g. from
+      # `openssl rand -hex 32`.
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      # Set to 1 to hide every tool that can change the budget.
+      - ACTUAL_MCP_READ_ONLY=${ACTUAL_MCP_READ_ONLY:-}
+    volumes:
+      # The server's own local copy of the budget; the sync server holds the
+      # master copy.
+      - /mnt/maincache/appdata/actual-budget/mcp:/data
+    depends_on:
+      - actual-server
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+    restart: unless-stopped
+
 configs:
-  # tailscale serve: HTTPS on :443 -> actual-server:5006, tailnet only.
+  # tailscale serve: HTTPS on :443, tailnet only. / -> actual-server:5006 and
+  # /mcp -> actual-mcp:3600/mcp.
   # `$$` escapes compose interpolation; containerboot fills in TS_CERT_DOMAIN.
   ts-serve:
     content: |
@@ -80,7 +120,10 @@ configs:
         "TCP": { "443": { "HTTPS": true } },
         "Web": {
           "$${TS_CERT_DOMAIN}:443": {
-            "Handlers": { "/": { "Proxy": "http://actual-server:5006" } }
+            "Handlers": {
+              "/": { "Proxy": "http://actual-server:5006" },
+              "/mcp": { "Proxy": "http://actual-mcp:3600/mcp" }
+            }
           }
         },
         "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": false }
