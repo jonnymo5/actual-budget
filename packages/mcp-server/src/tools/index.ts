@@ -7,6 +7,9 @@ import { spendingTrends } from './analysis/spending-trends';
 import { categorizeTransactions } from './categorize/categorize-transactions';
 import { getUncategorized } from './categorize/get-uncategorized';
 import { updateTransaction } from './categorize/update-transaction';
+import { importTransactions } from './import/import-transactions';
+import { parseOfx } from './import/parse-ofx';
+import { reconcileAccountTool } from './import/reconcile-account';
 import { getBudgetMonth } from './query/get-budget-month';
 import { getBudgetMonths } from './query/get-budget-months';
 import { getCategories } from './query/get-categories';
@@ -50,4 +53,7 @@ export const allTools: ToolDefinition[] = [
   updateRule,
   deleteRule,
   applyRulesRetroactively,
+  parseOfx,
+  importTransactions,
+  reconcileAccountTool,
 ];
