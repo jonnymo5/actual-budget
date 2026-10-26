@@ -26,6 +26,8 @@ import { createRule } from './rules/create-rule';
 import { deleteRule } from './rules/delete-rule';
 import { previewRule } from './rules/preview-rule';
 import { updateRule } from './rules/update-rule';
+import { findTransferCandidates } from './transfers/find-transfer-candidates';
+import { linkTransfers } from './transfers/link-transfers';
 
 /** Every tool the server can offer; the registry decides which to expose. */
 export const allTools: ToolDefinition[] = [
@@ -48,6 +50,8 @@ export const allTools: ToolDefinition[] = [
   getUncategorized,
   categorizeTransactions,
   updateTransaction,
+  findTransferCandidates,
+  linkTransfers,
   previewRule,
   createRule,
   updateRule,

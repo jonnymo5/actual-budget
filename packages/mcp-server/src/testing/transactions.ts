@@ -37,6 +37,7 @@ function build(
     category_group: category === null ? null : 'Everyday',
     category_is_income: incomeCategory,
     is_transfer: false,
+    transfer_counterpart_off_budget: false,
     ...extra,
   };
 }
@@ -62,6 +63,22 @@ export function earned(
 ) {
   return build(date, Math.round(dollars * 100), payee, category, true, {
     category_group: 'Income',
+    ...extra,
+  });
+}
+
+/** Money moved in from a tracking account (a linked transfer from off budget). */
+export function drawn(
+  date: string,
+  dollars: number,
+  payee: string | null,
+  category: string | null = null,
+  extra: Extra = {},
+) {
+  return build(date, Math.round(dollars * 100), payee, category, false, {
+    is_transfer: true,
+    transfer_counterpart_off_budget: true,
+    category_is_income: category !== null,
     ...extra,
   });
 }

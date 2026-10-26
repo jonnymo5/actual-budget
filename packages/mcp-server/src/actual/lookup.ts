@@ -49,7 +49,7 @@ function resolveNamed(
     )
   ) {
     throw toolError(
-      `"${text}" is a transfer payee, which marks a transfer between accounts and cannot be set or matched here.`,
+      `"${text}" is a transfer payee, which marks a transfer between accounts and cannot be set or matched here. To make two transactions a transfer, use link_transfers.`,
     );
   }
 

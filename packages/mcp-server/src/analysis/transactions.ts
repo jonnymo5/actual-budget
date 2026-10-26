@@ -16,6 +16,11 @@ export type AnalysisTransaction = {
   /** True when the category is one of the budget's income categories. */
   category_is_income: boolean;
   is_transfer: boolean;
+  /**
+   * For a transfer: whether the account on its other side is a tracking
+   * (off-budget) account, such as savings or investments. False otherwise.
+   */
+  transfer_counterpart_off_budget: boolean;
 };
 
 export type FlowKind = 'spending' | 'income';
@@ -24,18 +29,34 @@ export const UNCATEGORIZED = '(uncategorized)';
 export const NO_PAYEE = '(no payee)';
 
 /**
+ * Money that came in from a tracking account (savings, an investment sale)
+ * and so is not earnings, however it is categorised. Filing it under an income
+ * category is how it reaches the envelopes to be spent, but it must not make a
+ * month look richer than it was.
+ */
+export function isSavingsDraw(transaction: AnalysisTransaction): boolean {
+  return (
+    transaction.is_transfer &&
+    transaction.amount > 0 &&
+    !transaction.account_off_budget &&
+    transaction.transfer_counterpart_off_budget
+  );
+}
+
+/**
  * Whether a transaction is money spent, money earned, or neither.
  *
  * A category decides when there is one, so a refund in a spending category
  * reduces spending instead of counting as income. Without a category the sign
  * decides. Transfers between accounts are neither, unless they carry a
  * category (a transfer to an off-budget account that was budgeted as an
- * expense).
+ * expense). Money drawn from a tracking account is never income or spending.
  */
 export function classifyFlow(
   transaction: AnalysisTransaction,
 ): FlowKind | null {
   if (transaction.amount === 0) return null;
+  if (isSavingsDraw(transaction)) return null;
   if (transaction.category_id !== null) {
     return transaction.category_is_income ? 'income' : 'spending';
   }

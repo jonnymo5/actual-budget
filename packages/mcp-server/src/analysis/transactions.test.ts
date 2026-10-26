@@ -1,6 +1,11 @@
-import { earned, refunded, spent } from '#testing/transactions';
+import { drawn, earned, refunded, spent } from '#testing/transactions';
 
-import { classifyFlow, groupOf, UNCATEGORIZED } from './transactions';
+import {
+  classifyFlow,
+  groupOf,
+  isSavingsDraw,
+  UNCATEGORIZED,
+} from './transactions';
 
 describe('classifyFlow', () => {
   it('trusts the category when there is one', () => {
@@ -37,6 +42,60 @@ describe('classifyFlow', () => {
 
   it('ignores zero amounts', () => {
     expect(classifyFlow(spent('2029-05-01', 0, 'Shop', 'Food'))).toBeNull();
+  });
+
+  describe('money drawn from a tracking account', () => {
+    it('is not income, even when filed under an income category to fund the envelopes', () => {
+      const sale = drawn('2029-05-01', 5000, 'Brokerage', 'Starting Balances');
+      expect(sale.category_is_income).toBe(true);
+      expect(isSavingsDraw(sale)).toBe(true);
+      expect(classifyFlow(sale)).toBeNull();
+    });
+
+    it('is not income without a category either', () => {
+      const sale = drawn('2029-05-01', 5000, 'Brokerage');
+      expect(isSavingsDraw(sale)).toBe(true);
+      expect(classifyFlow(sale)).toBeNull();
+    });
+
+    it('is neither income nor a spending offset when filed under a spending category', () => {
+      const sale = {
+        ...drawn('2029-05-01', 5000, 'Brokerage', 'Savings'),
+        category_is_income: false,
+      };
+      expect(classifyFlow(sale)).toBeNull();
+    });
+
+    it('leaves a transfer between two budget accounts, and real income, alone', () => {
+      const between = {
+        ...drawn('2029-05-01', 300, 'Savings', 'Starting Balances'),
+        transfer_counterpart_off_budget: false,
+      };
+      expect(isSavingsDraw(between)).toBe(false);
+      expect(classifyFlow(between)).toBe('income');
+      expect(isSavingsDraw(earned('2029-05-01', 900, 'Boss'))).toBe(false);
+    });
+
+    it('is not a draw when money goes the other way', () => {
+      const contribution = {
+        ...spent('2029-05-01', 300, 'Brokerage', 'Savings', {
+          is_transfer: true,
+        }),
+        transfer_counterpart_off_budget: true,
+      };
+      expect(isSavingsDraw(contribution)).toBe(false);
+      // Saving is still budgeted spending.
+      expect(classifyFlow(contribution)).toBe('spending');
+    });
+
+    it("is not counted from the tracking account's own side", () => {
+      const receiving = {
+        ...drawn('2029-05-01', 300, 'Checking', null),
+        account_off_budget: true,
+        transfer_counterpart_off_budget: false,
+      };
+      expect(isSavingsDraw(receiving)).toBe(false);
+    });
   });
 });
 
