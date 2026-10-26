@@ -5,6 +5,7 @@ import { assertKnownAccount } from '#actual/transactions';
 import { monthOf, monthsBetween, previousPeriod } from '#analysis/dates';
 import { summarizeSpending } from '#analysis/spending';
 import type { SummaryRow } from '#analysis/spending';
+import { isSavingsDraw } from '#analysis/transactions';
 import { toolError } from '#errors';
 import { defineTool } from '#tools/registry';
 import { isoDate } from '#tools/schemas';
@@ -41,7 +42,7 @@ export const spendingSummary = defineTool({
   name: 'spending_summary',
   title: 'Summarize spending',
   description:
-    'Where the money went: totals over a date range, grouped by category, category group, payee or month, biggest first. Amounts are in major currency units (e.g. dollars, not cents) and signed: spending is negative, income is positive. Dates are YYYY-MM-DD, both ends inclusive. Kind "spending" (the default) counts what was spent, with refunds reducing it; "income" counts what was earned; "all" is the net. Transfers between accounts are never counted. Uncategorized transactions appear as "(uncategorized)". With compare_to_previous, every row also shows how it changed against the period just before (the same number of whole months when the range is whole months, otherwise the same number of days). Rows beyond the limit are rolled into one "Other" row, so the answer stays short; use get_transactions to see individual transactions.',
+    'Where the money went: totals over a date range, grouped by category, category group, payee or month, biggest first. Amounts are in major currency units (e.g. dollars, not cents) and signed: spending is negative, income is positive. Dates are YYYY-MM-DD, both ends inclusive. Kind "spending" (the default) counts what was spent, with refunds reducing it; "income" counts what was earned; "all" is the net. Transfers between accounts are never counted, and money moved in from a tracking (off-budget) account such as savings or investments is never income: it is reported separately as savings_draws. Uncategorized transactions appear as "(uncategorized)". With compare_to_previous, every row also shows how it changed against the period just before (the same number of whole months when the range is whole months, otherwise the same number of days). Rows beyond the limit are rolled into one "Other" row, so the answer stays short; use get_transactions to see individual transactions.',
   kind: 'read',
   input: {
     start_date: isoDate.describe('First day to include, YYYY-MM-DD.'),
@@ -102,6 +103,14 @@ export const spendingSummary = defineTool({
     other: rowSchema
       .nullable()
       .describe('Everything beyond the limit, added together.'),
+    savings_draws: z
+      .object({
+        count: z.number(),
+        total: z.number().describe('Major units.'),
+      })
+      .describe(
+        'Money moved in from a tracking account (savings, investments) during the period. It is left out of income and spending above, whatever its category.',
+      ),
   },
   async handler(input, ctx) {
     const period = { start: input.start_date, end: input.end_date };
@@ -146,6 +155,14 @@ export const spendingSummary = defineTool({
       money: ctx.amounts,
     });
 
+    const draws = inPeriod(period.start, period.end).filter(isSavingsDraw);
+    const savingsDraws = {
+      count: draws.length,
+      total: ctx.amounts.toMajor(
+        draws.reduce((sum, draw) => sum + draw.amount, 0),
+      ),
+    };
+
     const { format } = ctx.amounts;
     const describeRow = (row: SummaryRow) =>
       `${row.name}: ${format(row.total)}${row.share === null ? '' : ` (${(row.share * 100).toFixed(1)}%)`}, ${row.transaction_count} transaction(s)${row.comparison ? `, ${describeComparison(input.kind, row.comparison, format)}` : ''}`;
@@ -154,6 +171,11 @@ export const spendingSummary = defineTool({
       header,
       ...summary.rows.map(row => `- ${describeRow(row)}`),
       ...(summary.other ? [`- ${describeRow(summary.other)}`] : []),
+      ...(savingsDraws.count > 0
+        ? [
+            `Not counted: ${format(savingsDraws.total)} moved in from a tracking account (${savingsDraws.count} transfer(s)).`,
+          ]
+        : []),
     ];
 
     return {
@@ -170,6 +192,7 @@ export const spendingSummary = defineTool({
         comparison: summary.comparison,
         rows: summary.rows,
         other: summary.other,
+        savings_draws: savingsDraws,
       },
       text: lines.join('\n'),
     };

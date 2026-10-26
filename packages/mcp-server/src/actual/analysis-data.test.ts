@@ -181,3 +181,65 @@ describe('getFirstTransactionDate', () => {
     expect(await budget.use(getFirstTransactionDate)).toBe('2019-02-06');
   });
 });
+
+describe('loadAnalysisTransactions and transfers', () => {
+  it('tells a transfer from a tracking account apart from one between budget accounts', async () => {
+    const rows = await budget.use(async ctx => {
+      const { api, amounts } = ctx;
+      const brokerage = await api.createAccount({
+        name: 'Draw Brokerage',
+        offbudget: true,
+      });
+      const spending = await api.createAccount({ name: 'Draw Spending' });
+      const reserve = await api.createAccount({ name: 'Draw Reserve' });
+      const transferPayee = async (account: string) => {
+        const payee = (await api.getPayees()).find(
+          candidate => candidate.transfer_acct === account,
+        );
+        if (!payee) throw new Error('no transfer payee');
+        return payee.id;
+      };
+
+      // Entered on the sending side; Actual creates the receiving side.
+      await api.addTransactions(
+        brokerage,
+        [
+          {
+            date: '2029-06-03',
+            amount: amounts.toMinor(-400),
+            payee: await transferPayee(spending),
+          },
+        ],
+        { runTransfers: true },
+      );
+      await api.addTransactions(
+        reserve,
+        [
+          {
+            date: '2029-06-04',
+            amount: amounts.toMinor(-250),
+            payee: await transferPayee(spending),
+          },
+        ],
+        { runTransfers: true },
+      );
+
+      return loadAnalysisTransactions(ctx, {
+        startDate: '2029-06-01',
+        endDate: '2029-06-30',
+        accountId: spending,
+        includeOffBudget: false,
+      });
+    });
+
+    expect(rows.map(row => [row.amount, row.is_transfer])).toEqual([
+      [40000, true],
+      [25000, true],
+    ]);
+    // 400.00 came from the off-budget brokerage; 250.00 from another budget account.
+    expect(rows.map(row => row.transfer_counterpart_off_budget)).toEqual([
+      true,
+      false,
+    ]);
+  });
+});

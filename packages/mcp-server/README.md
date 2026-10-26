@@ -19,6 +19,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Look around | `get_overview` (start here), `list_accounts`, `get_categories`, `get_payees`, `get_transactions`, `get_budget_months`, `get_budget_month`, `get_schedules`, `get_rules`, `run_query` (read-only ActualQL for anything else) |
 | Analyse     | `spending_summary`, `spending_trends`, `find_outliers`, `detect_recurring`, `cash_flow_projection`, `month_comparison`                                                                                                      |
 | Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                        |
+| Transfers   | `find_transfer_candidates`, `link_transfers`                                                                                                                                                                                |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                    |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                     |
 
@@ -40,6 +41,53 @@ very large statement is slow and costs tokens.
 - **Authentication.** Over HTTP, set `MCP_AUTH_TOKEN` to require a bearer
   token. Without it, anyone who can reach the port can use the server, so
   only leave it unset behind something like a private tailnet.
+
+### Transfers
+
+Money moved between your own accounts is a transfer, not income or spending,
+and Actual leaves it out of the budget once both sides are linked. Bank
+imports rarely link them: a card payment arrives as a deposit on the card and
+a withdrawal from checking, so the card side looks like income and the other
+like spending.
+
+- `find_transfer_candidates` lists unlinked pairs: the same amount with
+  opposite signs, in different accounts, within a few days. A pair is **clear**
+  when nothing else fits either side, the dates are within three days and no
+  category would be lost. Otherwise it **needs confirmation**, with the reason:
+  several transactions fit (two equal payments in a week), the dates are far
+  apart, or Actual would drop a category.
+- `link_transfers` makes the pairs transfers. Like every write tool it is dry
+  run by default. A pair that needs confirmation is refused unless
+  `allow_uncertain` is true, so Claude links the clear ones, asks you about
+  the rest, and links only the ones you agree to.
+
+Linking uses the same fields as Actual's own "make transfer" (each side gets
+the other account's transfer payee and a `transfer_id`), with the transfer
+logic switched off so nothing is duplicated and each side keeps its own notes.
+Actual drops the category of a transfer between two on-budget accounts (or two
+off-budget ones); a transfer between an on-budget and an off-budget account
+keeps it. The preview says when a category will go.
+
+Import order matters if you ever give a transaction a transfer payee by other
+means, such as a rule: Actual then creates the matching transaction in the
+other account, which duplicates one that is already imported. Linking existing
+transactions with `link_transfers` has no such problem.
+
+#### Money from savings or an investment sale
+
+Money you move in from savings, or from selling investments, to pay for
+something is not earnings and should not make a month look richer than it was.
+Track the source as an **off-budget** account in Actual (say "Investments"),
+then give `link_transfers` the deposit and `counterpart_account` instead of a
+`counterpart_id`. It creates the other side in that account and links the two.
+You can still file the deposit under an income category such as "Starting
+Balances" so the envelopes can spend it.
+
+Analysis tools never count money transferred in from an off-budget account as
+income, or as a spending offset, whatever its category. `spending_summary`
+reports it separately as `savings_draws`. Money you move out to an off-budget
+account with a spending category (saving, investing) is still counted as
+spending.
 
 ## Configuration
 

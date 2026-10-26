@@ -22,6 +22,7 @@ const SELECTED_FIELDS = [
   'category.group.name',
   'category.group.is_income',
   'transfer_id',
+  'payee.transfer_acct.offbudget',
 ];
 
 const rowSchema = z.object({
@@ -39,6 +40,7 @@ const rowSchema = z.object({
   'category.group.name': z.string().nullable(),
   'category.group.is_income': z.boolean().nullable(),
   transfer_id: z.string().nullable(),
+  'payee.transfer_acct.offbudget': z.boolean().nullable(),
 });
 
 export type AnalysisFilters = {
@@ -94,6 +96,9 @@ export async function loadAnalysisTransactions(
       row['category.is_income'] || row['category.group.is_income'],
     ),
     is_transfer: row.transfer_id !== null,
+    // A transfer's payee is the account on its other side.
+    transfer_counterpart_off_budget:
+      row.transfer_id !== null && Boolean(row['payee.transfer_acct.offbudget']),
   }));
 }
 
