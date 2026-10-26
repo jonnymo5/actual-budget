@@ -36,12 +36,21 @@ export const getBudgetMonth = defineTool({
     month: z.string(),
     budget_type: z.enum(['envelope', 'tracking']),
     totals: z.object({
-      income_available: z.number(),
-      last_month_overspent: z.number(),
-      for_next_month: z.number().describe('Held back for next month.'),
+      income_available: z
+        .number()
+        .nullable()
+        .describe('Null in a tracking budget, which has no To Budget.'),
+      last_month_overspent: z.number().nullable(),
+      for_next_month: z
+        .number()
+        .nullable()
+        .describe('Held back for next month.'),
       total_budgeted: z.number(),
-      to_budget: z.number().describe('Still unassigned (envelope budgets).'),
-      from_last_month: z.number(),
+      to_budget: z
+        .number()
+        .nullable()
+        .describe('Still unassigned; null in a tracking budget.'),
+      from_last_month: z.number().nullable(),
       total_income: z.number(),
       total_spent: z.number().describe('Negative: money out.'),
       total_balance: z.number(),
@@ -86,7 +95,7 @@ export const getBudgetMonth = defineTool({
 
     const { totals } = budget;
     const lines = [
-      `Budget for ${budget.month} (${budget.budget_type}): budgeted ${format(totals.total_budgeted)}, spent ${format(totals.total_spent)}, income ${format(totals.total_income)}, to budget ${format(totals.to_budget)}`,
+      `Budget for ${budget.month} (${budget.budget_type}): budgeted ${format(totals.total_budgeted)}, spent ${format(totals.total_spent)}, income ${format(totals.total_income)}${totals.to_budget === null ? '' : `, to budget ${format(totals.to_budget)}`}`,
       ...budget.groups.flatMap(group => [
         `${group.name}${group.is_income ? ' (income)' : ''}: ${describe(group)}`,
         ...group.categories.map(

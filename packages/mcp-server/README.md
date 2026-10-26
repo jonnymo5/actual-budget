@@ -20,6 +20,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Analyse     | `spending_summary`, `spending_trends`, `find_outliers`, `detect_recurring`, `cash_flow_projection`, `month_comparison`                                                                                                      |
 | Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                        |
 | Transfers   | `find_transfer_candidates`, `link_transfers`                                                                                                                                                                                |
+| Budget      | `set_budget_amounts`                                                                                                                                                                                                        |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                    |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                     |
 
@@ -88,6 +89,27 @@ income, or as a spending offset, whatever its category. `spending_summary`
 reports it separately as `savings_draws`. Money you move out to an off-budget
 account with a spending category (saving, investing) is still counted as
 spending.
+
+### Budgets
+
+`set_budget_amounts` sets what is budgeted for categories in one or more
+months, so you can project costs and measure actual spending against them
+(`get_budget_month` and `month_comparison` show budgeted against actual).
+Give it categories, the months, and one amount for those months. Amounts are
+positive, unlike spending in transactions. Like every write tool it is dry run
+by default, and the preview shows each change and each month's budgeted total
+before and after.
+
+Actual keeps **separate amounts for the two budget types**. Whatever is set
+here is saved for the type in use now, and the preview says which. If you
+switch from an envelope budget to a tracking budget in Actual's settings, the
+tracking budget starts empty (the envelope amounts are kept, unused, and come
+back if you switch back), so switch first and set the amounts afterwards.
+
+A tracking budget suits comparing a projection with what happened: there is
+nothing to fund, overspending does not carry into the next month, and income
+categories can be budgeted too. An envelope budget cannot budget income, so
+`set_budget_amounts` skips income categories there and says so.
 
 ## Configuration
 

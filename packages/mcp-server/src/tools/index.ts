@@ -4,6 +4,7 @@ import { findOutliersTool } from './analysis/find-outliers';
 import { monthComparison } from './analysis/month-comparison';
 import { spendingSummary } from './analysis/spending-summary';
 import { spendingTrends } from './analysis/spending-trends';
+import { setBudgetAmounts } from './budget/set-budget-amounts';
 import { categorizeTransactions } from './categorize/categorize-transactions';
 import { getUncategorized } from './categorize/get-uncategorized';
 import { updateTransaction } from './categorize/update-transaction';
@@ -52,6 +53,7 @@ export const allTools: ToolDefinition[] = [
   updateTransaction,
   findTransferCandidates,
   linkTransfers,
+  setBudgetAmounts,
   previewRule,
   createRule,
   updateRule,
