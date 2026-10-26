@@ -32,12 +32,13 @@ export type BudgetMonth = {
   month: string;
   budget_type: 'envelope' | 'tracking';
   totals: {
-    income_available: number;
-    last_month_overspent: number;
-    for_next_month: number;
+    /** The envelope-only figures are null in a tracking budget, which has no To Budget. */
+    income_available: number | null;
+    last_month_overspent: number | null;
+    for_next_month: number | null;
     total_budgeted: number;
-    to_budget: number;
-    from_last_month: number;
+    to_budget: number | null;
+    from_last_month: number | null;
     total_income: number;
     total_spent: number;
     total_balance: number;
@@ -57,12 +58,13 @@ const rawAmountsShape = {
 type RawAmounts = z.output<z.ZodObject<typeof rawAmountsShape>>;
 
 const rawMonthSchema = z.object({
-  incomeAvailable: z.number(),
-  lastMonthOverspent: z.number(),
-  forNextMonth: z.number(),
+  // Actual leaves the first three and the last two out of a tracking budget.
+  incomeAvailable: amount,
+  lastMonthOverspent: amount,
+  forNextMonth: amount,
   totalBudgeted: z.number(),
-  toBudget: z.number(),
-  fromLastMonth: z.number(),
+  toBudget: amount,
+  fromLastMonth: amount,
   totalIncome: z.number(),
   totalSpent: z.number(),
   totalBalance: z.number(),
@@ -125,12 +127,12 @@ export async function getBudgetMonth(
     month,
     budget_type: prefs.budgetType === 'tracking' ? 'tracking' : 'envelope',
     totals: {
-      income_available: toMajor(raw.incomeAvailable),
-      last_month_overspent: toMajor(raw.lastMonthOverspent),
-      for_next_month: toMajor(raw.forNextMonth),
+      income_available: money(raw.incomeAvailable),
+      last_month_overspent: money(raw.lastMonthOverspent),
+      for_next_month: money(raw.forNextMonth),
       total_budgeted: toMajor(totalBudgeted),
-      to_budget: toMajor(raw.toBudget),
-      from_last_month: toMajor(raw.fromLastMonth),
+      to_budget: money(raw.toBudget),
+      from_last_month: money(raw.fromLastMonth),
       total_income: toMajor(raw.totalIncome),
       total_spent: toMajor(raw.totalSpent),
       total_balance: toMajor(raw.totalBalance),

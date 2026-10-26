@@ -48,6 +48,7 @@ const WRITE_TOOLS = [
   'delete_rule',
   'import_transactions',
   'link_transfers',
+  'set_budget_amounts',
   'update_rule',
   'update_transaction',
 ];
@@ -78,6 +79,7 @@ const REPORT_MONEY = [
   'preview_rule',
   'reconcile_account',
   'run_query',
+  'set_budget_amounts',
   'spending_summary',
   'spending_trends',
   'update_rule',
@@ -107,6 +109,7 @@ const REPORT_DATES: Record<string, RegExp> = {
   preview_rule: /YYYY-MM-DD/,
   reconcile_account: /YYYY-MM-DD/,
   run_query: /YYYY-MM-DD/,
+  set_budget_amounts: /YYYY-MM/,
   spending_summary: /YYYY-MM-DD/,
   spending_trends: /YYYY-MM/,
   update_rule: /YYYY-MM-DD/,
