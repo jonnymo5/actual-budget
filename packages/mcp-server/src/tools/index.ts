@@ -29,6 +29,7 @@ import { previewRule } from './rules/preview-rule';
 import { updateRule } from './rules/update-rule';
 import { findTransferCandidates } from './transfers/find-transfer-candidates';
 import { linkTransfers } from './transfers/link-transfers';
+import { moveTransfers } from './transfers/move-transfers';
 
 /** Every tool the server can offer; the registry decides which to expose. */
 export const allTools: ToolDefinition[] = [
@@ -53,6 +54,7 @@ export const allTools: ToolDefinition[] = [
   updateTransaction,
   findTransferCandidates,
   linkTransfers,
+  moveTransfers,
   setBudgetAmounts,
   previewRule,
   createRule,
