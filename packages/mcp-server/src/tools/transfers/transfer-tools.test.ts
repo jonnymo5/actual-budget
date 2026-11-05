@@ -12,11 +12,12 @@ import {
 } from '#testing/tools';
 
 // Every test gets a budget of its own, because most of them link transfers.
-// Main, Visa, Amex and Savings are on budget; Brokerage is a tracking account.
+// Main, Visa, Amex and Savings are on budget; Brokerage and Fund are tracking
+// accounts.
 let budget: TestBudget;
 let connection: Awaited<ReturnType<typeof connectTestClient>>;
 let accounts: Record<
-  'main' | 'visa' | 'amex' | 'savings' | 'brokerage',
+  'main' | 'visa' | 'amex' | 'savings' | 'brokerage' | 'fund',
   string
 >;
 let categories: { food: string; drawFund: string };
@@ -34,6 +35,7 @@ beforeEach(async () => {
         name: 'Brokerage',
         offbudget: true,
       }),
+      fund: await api.createAccount({ name: 'Fund', offbudget: true }),
     };
     const food = (await api.getCategories()).find(c => c.name === 'Food');
     const incomeGroup = (await api.getCategoryGroups()).find(g => g.is_income);
@@ -142,8 +144,32 @@ async function idOf(account: string, dollars: number, date?: string) {
   return found[0];
 }
 
+const moveSchema = z.object({
+  requested: z.number(),
+  ready_count: z.number(),
+  needs_confirmation_count: z.number(),
+  skipped_count: z.number(),
+  moved_count: z.number(),
+  moves: z.array(
+    z.object({
+      status: z.enum(['ready', 'needs_confirmation', 'skipped']),
+      transaction_id: z.string(),
+      stays: sideSchema.nullable(),
+      moves: sideSchema.nullable(),
+      move_to: z.string().nullable(),
+      category_cleared: z.boolean(),
+      reasons: z.array(z.string()),
+      skipped_reason: z.string().nullable(),
+      moved: z.boolean(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+  dry_run: z.boolean(),
+});
+
 const stateSchema = z.object({
   id: z.string(),
+  date: z.string(),
   account: z.string(),
   amount: z.number(),
   transfer_id: z.string().nullable(),
@@ -162,6 +188,7 @@ async function stateOf(ids: string[]) {
         .filter({ id: { $oneof: ids } })
         .select([
           'id',
+          'date',
           'account',
           'amount',
           'transfer_id',
@@ -182,6 +209,10 @@ async function count(account: string) {
 
 function link(args: Record<string, unknown>) {
   return succeed(connection, 'link_transfers', args, linkSchema);
+}
+
+function move(args: Record<string, unknown>) {
+  return succeed(connection, 'move_transfers', args, moveSchema);
 }
 
 describe('find_transfer_candidates', () => {
@@ -782,6 +813,236 @@ describe('link_transfers', () => {
         status: 'skipped',
         skipped_reason: expect.stringMatching(/already a transfer/),
       });
+    });
+  });
+});
+
+describe('move_transfers', () => {
+  // Money that came from somewhere other than the Brokerage account, which the
+  // deposit was linked to by mistake.
+  async function wrongDeposit(
+    dollars = 2000,
+    category?: string,
+    date = '2026-10-05',
+  ) {
+    await add(accounts.main, [
+      { date, amount: dollars, payee: payees.sale, category },
+    ]);
+    const deposit = await idOf(accounts.main, dollars);
+    await link({
+      pairs: [{ transaction_id: deposit, counterpart_account: 'Brokerage' }],
+      dry_run: false,
+    });
+    return { deposit, other: await idOf(accounts.brokerage, -dollars, date) };
+  }
+
+  it('previews by default and changes nothing', async () => {
+    const { deposit, other } = await wrongDeposit();
+
+    const { data, text } = await move({
+      moves: [{ transaction_id: deposit, move_other_side_to: 'Fund' }],
+    });
+
+    expect(data).toMatchObject({
+      dry_run: true,
+      requested: 1,
+      ready_count: 1,
+      moved_count: 0,
+    });
+    expect(data.moves[0]).toMatchObject({
+      status: 'ready',
+      stays: { account: 'Main' },
+      moves: { account: 'Brokerage' },
+      move_to: 'Fund',
+      moved: false,
+    });
+    expect(text).toMatch(/Would move 1 of 1/);
+
+    const state = await stateOf([deposit, other]);
+    expect(state.get(other)).toMatchObject({
+      'account.name': 'Brokerage',
+      transfer_id: deposit,
+    });
+  });
+
+  it('moves the other side to the account, and leaves the staying side where it is', async () => {
+    const { deposit, other } = await wrongDeposit();
+    const before = await stateOf([deposit, other]);
+
+    const { data } = await move({
+      moves: [{ transaction_id: deposit, move_other_side_to: 'Fund' }],
+      dry_run: false,
+    });
+
+    expect(data).toMatchObject({ dry_run: false, moved_count: 1 });
+    expect(data.moves[0].moved).toBe(true);
+
+    const state = await stateOf([deposit, other]);
+    // The same two transactions, still linked to each other...
+    expect(state.get(other)).toMatchObject({
+      'account.name': 'Fund',
+      transfer_id: deposit,
+      'payee.name': 'Main',
+      date: '2026-10-05',
+    });
+    expect(state.get(deposit)).toMatchObject({
+      'account.name': 'Main',
+      transfer_id: other,
+      'payee.name': 'Fund',
+      amount: before.get(deposit)?.amount,
+    });
+    // ...with the amounts still cancelling out.
+    expect(state.get(other)?.amount).toBe(-(state.get(deposit)?.amount ?? 0));
+    // Nothing was duplicated or left behind.
+    expect(await count(accounts.brokerage)).toBe(0);
+    expect(await count(accounts.fund)).toBe(1);
+    expect(await count(accounts.main)).toBe(1);
+  });
+
+  it('accepts the account by id, and moves an ordinary card payment too', async () => {
+    await add(accounts.main, [{ date: '2026-09-30', amount: -500 }]);
+    await add(accounts.visa, [{ date: '2026-10-01', amount: 500 }]);
+    const out = await idOf(accounts.main, -500);
+    const into = await idOf(accounts.visa, 500);
+    await link({
+      pairs: [{ transaction_id: out, counterpart_id: into }],
+      dry_run: false,
+    });
+
+    // It was the Amex that was paid, not the Visa.
+    const { data } = await move({
+      moves: [{ transaction_id: out, move_other_side_to: accounts.amex }],
+      dry_run: false,
+    });
+
+    expect(data.moves[0]).toMatchObject({ status: 'ready', moved: true });
+    const state = await stateOf([out, into]);
+    expect(state.get(into)).toMatchObject({
+      'account.name': 'Amex',
+      transfer_id: out,
+    });
+    expect(state.get(out)?.['payee.name']).toBe('Amex');
+    expect(await count(accounts.visa)).toBe(0);
+  });
+
+  describe('categories', () => {
+    it('keeps the category when the transfer still ends in a tracking account', async () => {
+      const { deposit } = await wrongDeposit(2000, categories.food);
+
+      const { data } = await move({
+        moves: [{ transaction_id: deposit, move_other_side_to: 'Fund' }],
+        dry_run: false,
+      });
+
+      expect(data.moves[0]).toMatchObject({
+        status: 'ready',
+        category_cleared: false,
+        moved: true,
+      });
+      expect((await stateOf([deposit])).get(deposit)?.['category.name']).toBe(
+        'Food',
+      );
+    });
+
+    it('asks before moving the other side to a budget account, which drops the category, then does it', async () => {
+      const { deposit, other } = await wrongDeposit(2000, categories.food);
+
+      const preview = await move({
+        moves: [{ transaction_id: deposit, move_other_side_to: 'Savings' }],
+      });
+      expect(preview.data.moves[0]).toMatchObject({
+        status: 'needs_confirmation',
+        category_cleared: true,
+        reasons: ['category_would_be_cleared'],
+      });
+      expect(preview.text).toMatch(/ASK FIRST/);
+
+      // Without the person's agreement nothing happens.
+      const refused = await move({
+        moves: [{ transaction_id: deposit, move_other_side_to: 'Savings' }],
+        dry_run: false,
+      });
+      expect(refused.data).toMatchObject({
+        moved_count: 0,
+        needs_confirmation_count: 1,
+      });
+      let state = await stateOf([deposit, other]);
+      expect(state.get(other)?.['account.name']).toBe('Brokerage');
+      expect(state.get(deposit)?.['category.name']).toBe('Food');
+
+      const agreed = await move({
+        moves: [{ transaction_id: deposit, move_other_side_to: 'Savings' }],
+        allow_uncertain: true,
+        dry_run: false,
+      });
+      expect(agreed.data.moved_count).toBe(1);
+      state = await stateOf([deposit, other]);
+      expect(state.get(other)?.['account.name']).toBe('Savings');
+      expect(state.get(deposit)?.['category.name']).toBeNull();
+    });
+  });
+
+  describe('moves that cannot be made', () => {
+    it('are skipped with the reason, and do not stop the others', async () => {
+      const { deposit, other } = await wrongDeposit(2000);
+      const second = await wrongDeposit(700, undefined, '2026-10-06');
+      await add(accounts.main, [{ date: '2026-10-07', amount: -30 }]);
+      const plain = await idOf(accounts.main, -30);
+
+      const { data } = await move({
+        moves: [
+          { transaction_id: plain, move_other_side_to: 'Fund' },
+          { transaction_id: 'nope', move_other_side_to: 'Fund' },
+          { transaction_id: deposit, move_other_side_to: 'Main' },
+          { transaction_id: deposit, move_other_side_to: 'Brokerage' },
+          { transaction_id: second.deposit, move_other_side_to: 'Fund' },
+        ],
+        dry_run: false,
+      });
+
+      expect(data).toMatchObject({
+        requested: 5,
+        skipped_count: 4,
+        ready_count: 1,
+        moved_count: 1,
+      });
+      const skipped = (index: number) => data.moves[index].skipped_reason;
+      expect(skipped(0)).toMatch(/not a transfer yet/);
+      expect(skipped(1)).toMatch(/unknown id/);
+      expect(skipped(2)).toMatch(/same account as this one/);
+      expect(skipped(3)).toMatch(/already in Brokerage/);
+      expect(data.moves[4]).toMatchObject({ status: 'ready', moved: true });
+
+      const state = await stateOf([other, second.other]);
+      expect(state.get(other)?.['account.name']).toBe('Brokerage');
+      expect(state.get(second.other)?.['account.name']).toBe('Fund');
+    });
+
+    it('will not move both sides of one transfer in the same request', async () => {
+      const { deposit, other } = await wrongDeposit();
+
+      const { data } = await move({
+        moves: [
+          { transaction_id: deposit, move_other_side_to: 'Fund' },
+          { transaction_id: other, move_other_side_to: 'Savings' },
+        ],
+        dry_run: false,
+      });
+
+      expect(data).toMatchObject({ moved_count: 1, skipped_count: 1 });
+      expect(data.moves[1].skipped_reason).toMatch(/earlier move/);
+      expect((await stateOf([other])).get(other)?.['account.name']).toBe(
+        'Fund',
+      );
+    });
+
+    it('names the accounts it knows when one is unknown', async () => {
+      const { deposit } = await wrongDeposit();
+      expect(
+        await fail(connection, 'move_transfers', {
+          moves: [{ transaction_id: deposit, move_other_side_to: 'Nowhere' }],
+        }),
+      ).toMatch(/unknown account "Nowhere".*Brokerage/);
     });
   });
 });

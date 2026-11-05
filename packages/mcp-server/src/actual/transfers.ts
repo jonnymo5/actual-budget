@@ -46,6 +46,8 @@ export type TransferSide = TransferCandidate & {
   payee_id: string | null;
   /** True once the transaction is one side of a transfer. */
   is_transfer: boolean;
+  /** The id of the transfer's other side, when this is a transfer. */
+  transfer_id: string | null;
   /** Part of a split transaction (the summary line or one of its lines). */
   is_split: boolean;
   /** Reconciled transactions are locked in Actual's own screens. */
@@ -65,6 +67,7 @@ function toSide(row: z.output<typeof rowSchema>): TransferSide {
     category_id: row.category,
     category: row['category.name'],
     is_transfer: row.transfer_id !== null,
+    transfer_id: row.transfer_id,
     is_split: Boolean(row.is_parent || row.is_child),
     reconciled: Boolean(row.reconciled),
   };
@@ -273,6 +276,78 @@ export async function applyCreations(
       `${missed.length} of ${ops.length} transfers were not created (for example ${missed[0].side.id}). Check them with get_transactions before trying again.`,
     );
   }
+}
+
+/** A transfer whose other side is to move to another account. */
+export type MoveOp = {
+  /** The side that stays where it is. */
+  side: TransferSide;
+  /** The other side, which moves. */
+  counterpart: TransferSide;
+  /** The account the other side moves to. */
+  account: AccountInfo;
+  /** That account's transfer payee. */
+  payee: string;
+};
+
+/**
+ * Moves the other side of each transfer to another account by giving the side
+ * that stays that account's transfer payee. That is what Actual's own screens
+ * do when the payee of a transfer is changed, and loot-core's transfer logic
+ * then puts the other side in the new account: same date, opposite amount, the
+ * staying side's account as its payee and the staying side's notes. Actual
+ * drops the category of both sides if the two accounts are of one kind.
+ */
+export async function applyMoves(
+  ctx: ActualContext,
+  ops: MoveOp[],
+): Promise<void> {
+  if (ops.length === 0) return;
+
+  await ctx.lootCore.send('transactions-batch-update', {
+    updated: ops.map(op => ({ id: op.side.id, payee: op.payee })),
+  });
+
+  const rows = await rawPlacements(
+    ctx,
+    ops.flatMap(op => [op.side.id, op.counterpart.id]),
+  );
+  const missed = ops.filter(op => {
+    const stays = rows.get(op.side.id);
+    const moved = rows.get(op.counterpart.id);
+    return (
+      stays?.transfer_id !== op.counterpart.id ||
+      moved?.transfer_id !== op.side.id ||
+      moved.account !== op.account.id
+    );
+  });
+  if (missed.length > 0) {
+    throw new Error(
+      `${missed.length} of ${ops.length} transfers were not moved (for example ${missed[0].side.id}). Check them with get_transactions before trying again.`,
+    );
+  }
+}
+
+const placementRow = z.object({
+  id: z.string(),
+  account: z.string(),
+  transfer_id: z.string().nullable(),
+});
+
+async function rawPlacements(
+  ctx: ActualContext,
+  ids: string[],
+): Promise<Map<string, z.output<typeof placementRow>>> {
+  const rows = await queryRows(
+    ctx,
+    ctx.api
+      .q('transactions')
+      .filter({ id: { $oneof: ids.filter(id => ID_SHAPED.test(id)) } })
+      .select(['id', 'account', 'transfer_id'])
+      .options({ splits: 'all' }),
+    placementRow,
+  );
+  return new Map(rows.map(row => [row.id, row]));
 }
 
 const transferIdRow = z.object({

@@ -19,7 +19,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Look around | `get_overview` (start here), `list_accounts`, `get_categories`, `get_payees`, `get_transactions`, `get_budget_months`, `get_budget_month`, `get_schedules`, `get_rules`, `run_query` (read-only ActualQL for anything else) |
 | Analyse     | `spending_summary`, `spending_trends`, `find_outliers`, `detect_recurring`, `cash_flow_projection`, `month_comparison`                                                                                                      |
 | Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                        |
-| Transfers   | `find_transfer_candidates`, `link_transfers`                                                                                                                                                                                |
+| Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                              |
 | Budget      | `set_budget_amounts`                                                                                                                                                                                                        |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                    |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                     |
@@ -61,6 +61,15 @@ like spending.
   run by default. A pair that needs confirmation is refused unless
   `allow_uncertain` is true, so Claude links the clear ones, asks you about
   the rest, and links only the ones you agree to.
+
+- `move_transfers` fixes a transfer that was linked to the wrong account. Give
+  it the side that stays and the account the other side belongs in. It moves
+  the other side rather than recreating it, the same way Actual's own screens
+  do when you change the payee of a transfer: the other side keeps its id,
+  date and cleared status, takes the staying side's notes, and pays to or from
+  the staying side's account. A move that would make Actual drop a category
+  (both accounts on budget, or both off) is refused unless `allow_uncertain` is
+  true.
 
 Linking uses the same fields as Actual's own "make transfer" (each side gets
 the other account's transfer payee and a `transfer_id`), with the transfer
