@@ -27,6 +27,7 @@ import { createRule } from './rules/create-rule';
 import { deleteRule } from './rules/delete-rule';
 import { previewRule } from './rules/preview-rule';
 import { updateRule } from './rules/update-rule';
+import { createSchedules } from './schedules/create-schedules';
 import { findTransferCandidates } from './transfers/find-transfer-candidates';
 import { linkTransfers } from './transfers/link-transfers';
 import { moveTransfers } from './transfers/move-transfers';
@@ -56,6 +57,7 @@ export const allTools: ToolDefinition[] = [
   linkTransfers,
   moveTransfers,
   setBudgetAmounts,
+  createSchedules,
   previewRule,
   createRule,
   updateRule,
