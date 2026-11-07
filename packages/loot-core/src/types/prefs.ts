@@ -99,7 +99,6 @@ export type LocalPrefs = Partial<{
   'budget.summaryCollapsed': boolean;
   'budget.showHiddenCategories': boolean;
   'budget.startMonth': string;
-  'flags.updateNotificationShownForVersion': string;
   'tour.introSeen': boolean;
   'schedules.showCompleted': boolean;
   reportsViewLegend: boolean;
@@ -143,7 +142,6 @@ export type GlobalPrefs = Partial<{
     autoStart?: boolean;
     port?: number;
   };
-  notifyWhenUpdateIsAvailable: boolean;
   lastSeenNewsDate: string; // YYYY-MM-DD of the newest news entry the user has seen on this device
   showNewsFeed: boolean; // Whether in-app notifications (bell, Notifications page, release toast) are shown.
 }>;
@@ -173,7 +171,6 @@ export type GlobalPrefsJson = Partial<{
   'plugin-theme'?: string; // JSON string of complete plugin theme (current selected plugin theme)
   'server-self-signed-cert'?: GlobalPrefs['serverSelfSignedCert'];
   syncServerConfig?: GlobalPrefs['syncServerConfig'];
-  notifyWhenUpdateIsAvailable?: GlobalPrefs['notifyWhenUpdateIsAvailable'];
   lastSeenNewsDate?: GlobalPrefs['lastSeenNewsDate'];
   showNewsFeed?: GlobalPrefs['showNewsFeed'];
 }>;

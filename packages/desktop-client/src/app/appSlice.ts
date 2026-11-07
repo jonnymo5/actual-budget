@@ -7,7 +7,6 @@ import { pushModal } from '#modals/modalsSlice';
 import { loadPrefs } from '#prefs/prefsSlice';
 import { createAppAsyncThunk } from '#redux';
 import { getUploadError } from '#util/error';
-import { getIsOutdated, getLatestVersion } from '#util/versions';
 
 const sliceName = 'app';
 
@@ -20,10 +19,6 @@ type AppState = {
   } | null;
   showUpdateNotification: boolean;
   managerHasInitialized: boolean;
-  versionInfo: {
-    latestVersion: string;
-    isOutdated: boolean;
-  } | null;
 };
 
 const initialState: AppState = {
@@ -31,7 +26,6 @@ const initialState: AppState = {
   updateInfo: null,
   showUpdateNotification: true,
   managerHasInitialized: false,
-  versionInfo: null,
 };
 
 export const resetApp = createAction(`${sliceName}/resetApp`);
@@ -104,26 +98,6 @@ export const sync = createAppAsyncThunk(
   },
 );
 
-export const getLatestAppVersion = createAppAsyncThunk(
-  `${sliceName}/getLatestAppVersion`,
-  async (_, { dispatch, getState }) => {
-    const globalPrefs = getState().prefs.global;
-    if (globalPrefs && globalPrefs.notifyWhenUpdateIsAvailable) {
-      const theLatestVersion = await getLatestVersion();
-      dispatch(
-        setAppState({
-          versionInfo: {
-            latestVersion: theLatestVersion,
-            isOutdated: getIsOutdated(theLatestVersion),
-          },
-        }),
-      );
-    }
-
-    return;
-  },
-);
-
 // Workaround for partial types in actions.
 // https://github.com/reduxjs/redux-toolkit/issues/1423#issuecomment-902680573
 type SetAppStatePayload = AtLeastOne<AppState>;
@@ -156,7 +130,6 @@ export const actions = {
   updateApp,
   resetSync,
   sync,
-  getLatestAppVersion,
 };
 
 export const { setAppState } = actions;
