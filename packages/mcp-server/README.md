@@ -21,6 +21,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                        |
 | Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                              |
 | Budget      | `set_budget_amounts`                                                                                                                                                                                                        |
+| Schedules   | `create_schedules`                                                                                                                                                                                                          |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                    |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                     |
 
@@ -42,6 +43,30 @@ very large statement is slow and costs tokens.
 - **Authentication.** Over HTTP, set `MCP_AUTH_TOKEN` to require a bearer
   token. Without it, anyone who can reach the port can use the server, so
   only leave it unset behind something like a private tailnet.
+
+### Schedules
+
+`get_schedules` lists the schedules in the budget and `create_schedules` adds
+new ones: the mortgage, a paycheck, a card payment, a subscription. Schedules
+are what `cash_flow_projection` uses to put each payment on its date, so
+scheduling the regular flows makes projections exact instead of averaged.
+
+- Each schedule has a unique name, an account, a payee, a signed amount and a
+  start date. The amount can be exact, approximate or a range (for bills that
+  vary), and the schedule can repeat daily, weekly, monthly or yearly, every
+  N periods, optionally ending after some occurrences or on a date.
+- A monthly schedule can fall on several days (`days_of_month: [1, 15]` for a
+  paycheck twice a month; `-1` is the last day), and a weekend rule moves a
+  date to the next weekday (payments) or the previous one (paychecks).
+- To schedule a credit card payment, give the card's account name as the
+  payee: Actual keeps a transfer payee for every account.
+- `posts_transaction` makes Actual enter the transaction by itself on the
+  date. It is off by default, which suits accounts whose transactions arrive
+  from the bank.
+- The preview shows each schedule's recurrence in words and its next six
+  dates, so dates and weekend moves can be checked before anything is
+  created. An entry that cannot be created is skipped with the reason and the
+  rest go ahead.
 
 ### Transfers
 

@@ -116,6 +116,26 @@ function occurrenceDates(
     .filter(day => day >= nextDate && day <= to);
 }
 
+// How far ahead to look for a schedule's next few dates: long enough that even
+// a yearly schedule shows its next two.
+const UPCOMING_WINDOW_DAYS = 731;
+
+/**
+ * The first `count` dates a schedule's date or recurrence falls on, from `from`
+ * on (inclusive), with weekend moves applied: the same expansion the cash flow
+ * projection uses. A one-off schedule has just its own date.
+ */
+export function upcomingDates(
+  date: string | RecurConfig,
+  { from, count }: { from: string; count: number },
+): string[] {
+  if (typeof date === 'string') return [date];
+  return occurrenceDates(date, from, addDays(from, UPCOMING_WINDOW_DAYS)).slice(
+    0,
+    count,
+  );
+}
+
 /**
  * The payments and deposits the schedules expect from `from` through `to`
  * (inclusive), in minor units. A schedule whose date has passed without being

@@ -7,8 +7,14 @@ export type NamedId = { id: string; name: string };
 export type Lookups = {
   /** A category, from its id or exact name (case-insensitive). */
   category: (text: string) => Promise<NamedId>;
-  /** A payee, from its id or exact name. Transfer payees are not accepted. */
-  payee: (text: string) => Promise<NamedId>;
+  /**
+   * A payee, from its id or exact name. Transfer payees (named after the
+   * account they stand for) are not accepted unless `allowTransfers` is true.
+   */
+  payee: (
+    text: string,
+    options?: { allowTransfers?: boolean },
+  ) => Promise<NamedId>;
   /** An account, from its id or exact name. */
   account: (text: string) => Promise<NamedId>;
 };
@@ -91,7 +97,7 @@ export function createLookups(ctx: ActualContext): Lookups {
         .then(list => list.map(({ id, name }) => ({ id, name })));
       return resolveNamed('category', await categories, text);
     },
-    async payee(text) {
+    async payee(text, { allowTransfers = false } = {}) {
       payees ??= ctx.api.getPayees().then(list => ({
         usable: list
           .filter(payee => !payee.transfer_acct)
@@ -101,7 +107,9 @@ export function createLookups(ctx: ActualContext): Lookups {
           .map(({ id, name }) => ({ id, name })),
       }));
       const { usable, transfers } = await payees;
-      return resolveNamed('payee', usable, text, { excluded: transfers });
+      return allowTransfers
+        ? resolveNamed('payee', [...usable, ...transfers], text)
+        : resolveNamed('payee', usable, text, { excluded: transfers });
     },
     async account(text) {
       accounts ??= ctx.api
