@@ -2,7 +2,7 @@
 # the Unraid host (wolverine, x86_64).
 #
 # This is a fork-only workflow; upstream's docker-nightly/docker-release
-# workflows target Depot runners and Docker Hub and are disabled here.
+# workflows target Depot runners and Docker Hub and were removed from this fork.
 # It is a separate file (not an edit to upstream's) so syncing upstream never
 # conflicts with it.
 #
