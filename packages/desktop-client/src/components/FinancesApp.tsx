@@ -9,17 +9,15 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import * as undo from '@actual-app/core/platform/client/undo';
 
-import { getLatestAppVersion, sync } from '#app/appSlice';
+import { sync } from '#app/appSlice';
 import { ProtectedRoute } from '#auth/ProtectedRoute';
 import { Permissions } from '#auth/types';
-import { useGlobalPref } from '#hooks/useGlobalPref';
-import { useLocalPref } from '#hooks/useLocalPref';
 import { useMetaThemeColor } from '#hooks/useMetaThemeColor';
 import { useNavigate } from '#hooks/useNavigate';
 import { useNewsNotification } from '#hooks/useNewsNotification';
 import { ScrollProvider } from '#hooks/useScrollListener';
 import { addNotification } from '#notifications/notificationsSlice';
-import { useDispatch, useSelector } from '#redux';
+import { useDispatch } from '#redux';
 
 import { UserAccessPage } from './admin/UserAccess/UserAccessPage';
 import { UserDirectoryPage } from './admin/UserDirectory/UserDirectoryPage';
@@ -98,14 +96,6 @@ export function FinancesApp() {
   const dispatch = useDispatch();
   const { t } = useTranslation();
 
-  const versionInfo = useSelector(state => state.app.versionInfo);
-  const [notifyWhenUpdateIsAvailable] = useGlobalPref(
-    'notifyWhenUpdateIsAvailable',
-  );
-  const [lastUsedVersion, setLastUsedVersion] = useLocalPref(
-    'flags.updateNotificationShownForVersion',
-  );
-
   const multiuserEnabled = useMultiuserEnabled();
 
   useNewsNotification();
@@ -144,56 +134,6 @@ export function FinancesApp() {
   });
 
   useEffect(() => init(), []);
-
-  useEffect(() => {
-    void dispatch(getLatestAppVersion());
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (notifyWhenUpdateIsAvailable && versionInfo) {
-      if (
-        versionInfo.isOutdated &&
-        lastUsedVersion !== versionInfo.latestVersion
-      ) {
-        dispatch(
-          addNotification({
-            notification: {
-              type: 'message',
-              title: t('A new version of Actual is available!'),
-              message:
-                (import.meta.env.REACT_APP_IS_PIKAPODS ?? '').toLowerCase() ===
-                'true'
-                  ? t(
-                      'A new version of Actual is available! Your Pikapods instance will be automatically updated in the next few days - no action needed.',
-                    )
-                  : t(
-                      'Version {{latestVersion}} of Actual was recently released.',
-                      { latestVersion: versionInfo.latestVersion },
-                    ),
-              sticky: true,
-              id: 'update-notification',
-              button: {
-                title: t('Open changelog'),
-                action: () => {
-                  window.open('https://actualbudget.org/docs/releases');
-                },
-              },
-              onClose: () => {
-                setLastUsedVersion(versionInfo.latestVersion);
-              },
-            },
-          }),
-        );
-      }
-    }
-  }, [
-    dispatch,
-    lastUsedVersion,
-    notifyWhenUpdateIsAvailable,
-    setLastUsedVersion,
-    t,
-    versionInfo,
-  ]);
 
   const scrollableRef = useRef<HTMLDivElement>(null);
 

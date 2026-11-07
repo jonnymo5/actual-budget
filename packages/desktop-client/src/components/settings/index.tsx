@@ -13,7 +13,6 @@ import { listen } from '@actual-app/core/platform/client/connection';
 import { isElectron } from '@actual-app/core/shared/environment';
 import { css } from '@emotion/css';
 
-import { getLatestAppVersion } from '#app/appSlice';
 import { closeBudget } from '#budgetfiles/budgetfilesSlice';
 import { Link } from '#components/common/Link';
 import { Checkbox, FormField, FormLabel } from '#components/forms';
@@ -24,7 +23,7 @@ import { useFeatureFlag } from '#hooks/useFeatureFlag';
 import { useGlobalPref } from '#hooks/useGlobalPref';
 import { useMetadataPref } from '#hooks/useMetadataPref';
 import { loadPrefs, saveSyncedPrefs } from '#prefs/prefsSlice';
-import { useDispatch, useSelector } from '#redux';
+import { useDispatch } from '#redux';
 
 import { AuthSettings } from './AuthSettings';
 import { Backups } from './Backups';
@@ -42,12 +41,6 @@ import { AdvancedToggle, Setting } from './UI';
 
 function About() {
   const version = useServerVersion();
-  const versionInfo = useSelector(state => state.app.versionInfo);
-  const [notifyWhenUpdateIsAvailable, setNotifyWhenUpdateIsAvailablePref] =
-    useGlobalPref('notifyWhenUpdateIsAvailable', () => {
-      void dispatch(getLatestAppVersion());
-    });
-  const dispatch = useDispatch();
   const [showNewsFeed, setShowNewsFeedPref] = useGlobalPref('showNewsFeed');
   const isNewsFeedEnabled = Boolean(showNewsFeed);
 
@@ -83,22 +76,6 @@ function About() {
         <Text>
           <Trans>Server version: {{ version }}</Trans>
         </Text>
-
-        {notifyWhenUpdateIsAvailable && versionInfo?.isOutdated ? (
-          <Link
-            variant="external"
-            to="https://actualbudget.org/docs/releases"
-            linkColor="purple"
-          >
-            <Trans>New version available: {versionInfo.latestVersion}</Trans>
-          </Link>
-        ) : (
-          <Text style={{ color: theme.noticeText, fontWeight: 600 }}>
-            {notifyWhenUpdateIsAvailable ? (
-              <Trans>You're up to date!</Trans>
-            ) : null}
-          </Text>
-        )}
         <Text>
           <Link
             variant="external"
@@ -118,18 +95,6 @@ function About() {
         </Text>
       </View>
       <View style={{ gap: 5 }}>
-        <Text style={{ display: 'flex' }}>
-          <Checkbox
-            id="settings-notifyWhenUpdateIsAvailable"
-            checked={notifyWhenUpdateIsAvailable}
-            onChange={e =>
-              setNotifyWhenUpdateIsAvailablePref(e.currentTarget.checked)
-            }
-          />
-          <label htmlFor="settings-notifyWhenUpdateIsAvailable">
-            <Trans>Display a notification when updates are available</Trans>
-          </label>
-        </Text>
         <Text style={{ display: 'flex' }}>
           <Checkbox
             id="settings-showNewsFeed"

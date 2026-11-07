@@ -133,12 +133,6 @@ async function saveGlobalPrefs(prefs: GlobalPrefs) {
   if (prefs.syncServerConfig !== undefined) {
     await asyncStorage.setItem('syncServerConfig', prefs.syncServerConfig);
   }
-  if (prefs.notifyWhenUpdateIsAvailable !== undefined) {
-    await asyncStorage.setItem(
-      'notifyWhenUpdateIsAvailable',
-      prefs.notifyWhenUpdateIsAvailable,
-    );
-  }
   if (prefs.lastSeenNewsDate !== undefined) {
     await asyncStorage.setItem('lastSeenNewsDate', prefs.lastSeenNewsDate);
   }
@@ -163,7 +157,6 @@ async function loadGlobalPrefs(): Promise<GlobalPrefs> {
     'custom-css-override': customCssOverride,
     'server-self-signed-cert': serverSelfSignedCert,
     syncServerConfig,
-    notifyWhenUpdateIsAvailable,
     lastSeenNewsDate,
     showNewsFeed,
   } = await asyncStorage.multiGet([
@@ -180,7 +173,6 @@ async function loadGlobalPrefs(): Promise<GlobalPrefs> {
     'custom-css-override',
     'server-self-signed-cert',
     'syncServerConfig',
-    'notifyWhenUpdateIsAvailable',
     'lastSeenNewsDate',
     'showNewsFeed',
   ] as const);
@@ -207,10 +199,6 @@ async function loadGlobalPrefs(): Promise<GlobalPrefs> {
     customCssOverride: customCssOverride || undefined,
     serverSelfSignedCert: serverSelfSignedCert || undefined,
     syncServerConfig: syncServerConfig || undefined,
-    notifyWhenUpdateIsAvailable:
-      notifyWhenUpdateIsAvailable === undefined
-        ? true
-        : notifyWhenUpdateIsAvailable, // default to true
     lastSeenNewsDate: lastSeenNewsDate || undefined,
     showNewsFeed: showNewsFeed === undefined ? true : showNewsFeed, // default to true
   };
