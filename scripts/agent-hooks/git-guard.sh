@@ -40,14 +40,33 @@ case "$cmd" in
     esac ;;
 esac
 
-# Never create GitHub issues from the shell — filing an issue is a human
-# decision (.github/agents/pr-and-commit-rules.md). Requires `gh` as a whole
-# token followed by "issue create", matching the real CLI form
+# Only create GitHub issues from the shell on the user's own fork, with the
+# target spelled out (.github/agents/pr-and-commit-rules.md) — a bare
+# `gh issue create` in a fork can resolve to the upstream repo. Requires `gh` as
+# a whole token followed by "issue create", matching the real CLI form
 # (`gh [flags] issue create …`); like the git checks below this is best-effort,
 # not evasion-proof (a hand-rolled `gh api` call is out of scope).
 case " $cmd " in
   *" gh "*"issue create"*)
-    block "Blocked: agents must not create GitHub issues — filing an issue is a human decision (.github/agents/pr-and-commit-rules.md). Share the proposed issue title and body with the user instead." ;;
+    case " $cmd " in
+      *" --repo jonnymo5/actual-budget "* | *" --repo=jonnymo5/actual-budget "* | \
+        *" -R jonnymo5/actual-budget "* | *" -R=jonnymo5/actual-budget "*) ;;
+      *)
+        block "Blocked: agents may only create GitHub issues on the user's fork — pass --repo jonnymo5/actual-budget explicitly, and never target upstream actualbudget/actual (.github/agents/pr-and-commit-rules.md). Otherwise share the proposed issue title and body with the user." ;;
+    esac ;;
+esac
+
+# Pull requests only go to the user's own fork, never to upstream
+# (actualbudget/actual), and the target must be spelled out: a bare
+# `gh pr create` in a fork resolves to the upstream repo.
+case " $cmd " in
+  *" gh "*"pr create"*)
+    case " $cmd " in
+      *" --repo jonnymo5/actual-budget "* | *" --repo=jonnymo5/actual-budget "* | \
+        *" -R jonnymo5/actual-budget "* | *" -R=jonnymo5/actual-budget "*) ;;
+      *)
+        block "Blocked: pull requests only go to the user's fork — pass --repo jonnymo5/actual-budget explicitly, and never target upstream actualbudget/actual (.github/agents/pr-and-commit-rules.md)." ;;
+    esac ;;
 esac
 
 # Everything below only applies to actual git invocations. Match `git` as a

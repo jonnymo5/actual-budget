@@ -25,6 +25,13 @@ input=$(cat)
 # itself can't make sense of.
 require_jq
 
+# Pull requests only go to the user's own fork, never to upstream
+# (actualbudget/actual). The call names its target in `.tool_input.owner` and
+# `.tool_input.repo`; anything else, or a payload that names none, is blocked.
+target=$(printf '%s' "$input" | jq -r '.tool_input | "\(.owner // "")/\(.repo // "")"' 2>/dev/null)
+[ "$target" = "jonnymo5/actual-budget" ] ||
+  block "Blocked: pull requests only go to the user's fork (owner jonnymo5, repo actual-budget), never upstream; got '${target}'. (.github/agents/pr-and-commit-rules.md)"
+
 # Resolve the repo root regardless of which agent invoked us, then the template.
 ROOT=$(resolve_repo_root)
 template="$ROOT/.github/PULL_REQUEST_TEMPLATE.md"
