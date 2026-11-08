@@ -321,3 +321,86 @@ export function rsuScheduleName(
   const base = `${RSU_SCHEDULE_PREFIX}${grantName.trim()} · ${vestDate}`;
   return dupIndex > 0 ? `${base} (${dupIndex + 1})` : base;
 }
+
+/** How long after a vest its deposit is still accepted as a match. */
+export const DEPOSIT_WINDOW_AFTER_DAYS = 10;
+/** How long before a vest a deposit may land and still count. */
+export const DEPOSIT_WINDOW_BEFORE_DAYS = 2;
+
+export type DepositCandidate = {
+  id: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** Integer cents, positive */
+  amount: number;
+};
+
+export type DepositMatch = {
+  eventId: string;
+  vestDate: string;
+  transactionId: string;
+  depositDate: string;
+  amount: number;
+};
+
+export type DepositMatchPlan = {
+  matched: DepositMatch[];
+  unmatched: string[];
+};
+
+function dayDistance(a: string, b: string): number {
+  return (
+    (new Date(`${a}T00:00:00Z`).getTime() -
+      new Date(`${b}T00:00:00Z`).getTime()) /
+    86_400_000
+  );
+}
+
+/**
+ * Pair vest events with deposits: each event takes the unused deposit that
+ * landed closest to its vest date, within the window. Pure, so the same plan
+ * can be previewed and then applied.
+ */
+export function planDepositMatches(
+  events: ReadonlyArray<Pick<RsuVestEventEntity, 'id' | 'vest_date'>>,
+  deposits: ReadonlyArray<DepositCandidate>,
+): DepositMatchPlan {
+  const plan: DepositMatchPlan = { matched: [], unmatched: [] };
+  const used = new Set<string>();
+  const ordered = [...events].sort((a, b) =>
+    a.vest_date.localeCompare(b.vest_date),
+  );
+
+  for (const event of ordered) {
+    const candidates = deposits
+      .filter(deposit => {
+        if (used.has(deposit.id) || deposit.amount <= 0) {
+          return false;
+        }
+        const offset = dayDistance(deposit.date, event.vest_date);
+        return (
+          offset >= -DEPOSIT_WINDOW_BEFORE_DAYS &&
+          offset <= DEPOSIT_WINDOW_AFTER_DAYS
+        );
+      })
+      .sort(
+        (a, b) =>
+          Math.abs(dayDistance(a.date, event.vest_date)) -
+          Math.abs(dayDistance(b.date, event.vest_date)),
+      );
+    const deposit = candidates[0];
+    if (!deposit) {
+      plan.unmatched.push(event.id);
+      continue;
+    }
+    used.add(deposit.id);
+    plan.matched.push({
+      eventId: event.id,
+      vestDate: event.vest_date,
+      transactionId: deposit.id,
+      depositDate: deposit.date,
+      amount: deposit.amount,
+    });
+  }
+  return plan;
+}

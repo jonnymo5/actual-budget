@@ -53,3 +53,7 @@ Each future vest row becomes a one-off, non-posting schedule named `RSU · <gran
 Because they are ordinary schedules, RSU vests are included in the [Balance Forecast](./reports/index.md), can be referenced from [budget templates](./experimental/goal-templates.md) with `#template schedule RSU · <grant> · <date>`, and are visible to any tool that reads schedules.
 
 The grid at the bottom of the page shows the net per grant and per month for one year, with recorded deposits highlighted, so you can see what a year of vests is worth while planning your budget.
+
+## From the MCP server
+
+The [MCP server](https://github.com/jonnymo5/actual-budget/tree/master/packages/mcp-server) exposes the same features to an AI assistant: `get_rsu_grants` (with a `year` for the monthly grid), `create_rsu_grant`, `update_rsu_grant`, `delete_rsu_grant`, `set_stock_price`, `refresh_stock_prices`, `lock_rsu_vest_prices` and `match_rsu_deposits`. Every tool that changes something previews first and only applies when asked again with `dry_run` false.

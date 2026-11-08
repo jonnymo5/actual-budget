@@ -1,172 +1,115 @@
-import {
-  normalizeTicker,
-  summarizeGrantPayout,
-  vestEventValue,
-} from '@actual-app/core/shared/rsu';
+import { normalizeTicker } from '@actual-app/core/shared/rsu';
 import { z } from 'zod';
 
+import {
+  buildGrantView,
+  buildPriceView,
+  describeGrant,
+  grantViewSchema,
+  loadRsuData,
+  monthlyIncome,
+  priceByTicker,
+  priceViewSchema,
+  resolveGrant,
+} from '#actual/rsu';
 import { defineTool } from '#tools/registry';
-
-const vestEventSchema = z.object({
-  id: z.string(),
-  vest_date: z.string().describe('YYYY-MM-DD.'),
-  shares: z.number(),
-  vest_price: z
-    .number()
-    .nullable()
-    .describe(
-      'Share price locked on the vest date, major units; set once a row has vested.',
-    ),
-  est_gross: z
-    .number()
-    .nullable()
-    .describe(
-      'Shares × price, major units: the vest-date price once locked, else the current quote; null without either.',
-    ),
-  est_net: z
-    .number()
-    .nullable()
-    .describe(
-      'Cash after withholding, major units; the recorded actual net when there is one.',
-    ),
-  basis: z
-    .enum(['actual', 'locked', 'current'])
-    .nullable()
-    .describe(
-      'Where est_net comes from: a recorded deposit, the locked vest-date price, or the current quote.',
-    ),
-  actual_net: z
-    .number()
-    .nullable()
-    .describe('Net the user recorded after the vest, major units.'),
-  schedule_id: z
-    .string()
-    .nullable()
-    .describe('The schedule that stands for this vest, once created.'),
-});
 
 export const getRsuGrants = defineTool({
   name: 'get_rsu_grants',
   title: 'List RSU grants',
   description:
-    'List RSU (restricted stock unit) grants with their vest rows and the share prices behind the estimates. Each vest row gives its date (YYYY-MM-DD), share count, and the gross and net cash in major currency units (shares × price, net after the grant\'s tax withholding; shares are assumed sold at vest). Rows that have vested use the share price locked on the vest date, or the deposit the user recorded, so a grant\'s paid-out total does not move with the market. Future vest rows also exist as one-off schedules named "RSU · <grant> · <date>", which is how they reach cash_flow_projection and the Balance Forecast.',
+    'List RSU (restricted stock unit) grants with their vest rows and the share prices behind the estimates. Each vest row gives its date (YYYY-MM-DD), share count, and the gross and net cash in major currency units (shares × price, net after the grant\'s tax withholding; shares are assumed sold at vest). Rows that have vested use the share price locked on the vest date, or the deposit the user recorded, so a grant\'s paid-out total does not move with the market. Future vest rows also exist as one-off schedules named "RSU · <grant> · <date>", which is how they reach cash_flow_projection and the Balance Forecast. Pass year to also get the net per calendar month for that year.',
   kind: 'read',
-  input: {},
-  output: {
-    grants: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        ticker: z.string(),
-        grant_date: z.string().nullable().describe('YYYY-MM-DD.'),
-        total_shares: z.number(),
-        account_id: z.string(),
-        payee_id: z.string(),
-        category_id: z.string().nullable(),
-        withholding_rate: z
-          .number()
-          .describe('Fraction withheld for tax, 0..1 (0.37 = 37%).'),
-        paid_out_net: z
-          .number()
-          .describe(
-            'Net of rows that have vested (recorded deposits, else vest-date price estimates), major units.',
-          ),
-        remaining_est_net: z
-          .number()
-          .describe(
-            'Estimated net of rows still to vest at the current quote, major units.',
-          ),
-        unvalued_rows: z
-          .number()
-          .describe('Rows with neither a recorded net nor any price.'),
-        vest_events: z.array(vestEventSchema),
-      }),
-    ),
-    prices: z.array(
-      z.object({
-        ticker: z.string(),
-        price: z.number().describe('Major units per share.'),
-        currency: z.string().nullable(),
-        as_of: z.string().nullable().describe('ISO timestamp of the quote.'),
-        source: z.enum(['yahoo', 'stooq', 'manual']).nullable(),
-        manual_override: z
-          .boolean()
-          .describe('True when automatic refreshes leave this price alone.'),
-      }),
-    ),
+  input: {
+    grant: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Only this grant (name or id).'),
+    ticker: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Only grants in this stock symbol.'),
+    year: z
+      .number()
+      .int()
+      .min(1990)
+      .max(2200)
+      .optional()
+      .describe(
+        'Also return the net per month of this calendar year (what the RSU Grants page shows in its grid).',
+      ),
+    include_past_rows: z
+      .boolean()
+      .default(true)
+      .describe('Include vest rows whose date has passed. Default true.'),
   },
-  async handler(_input, ctx) {
-    const { grants, events, prices } = await ctx.lootCore.send('rsu/get');
-    const { toMajor, format } = ctx.amounts;
+  output: {
+    grants: z.array(grantViewSchema),
+    prices: z.array(priceViewSchema),
+    monthly: z
+      .object({
+        year: z.number(),
+        grants: z.array(
+          z.object({
+            grant_id: z.string(),
+            months: z
+              .array(z.number())
+              .describe('Twelve amounts, January first, major units.'),
+            total: z.number(),
+          }),
+        ),
+        totals: z.array(z.number()).describe('Twelve amounts, all grants.'),
+        grand_total: z.number(),
+        missing_price_tickers: z
+          .array(z.string())
+          .describe('Tickers whose rows were left out for want of a price.'),
+      })
+      .nullable()
+      .describe('Only when year was given.'),
+  },
+  async handler({ grant, ticker, year, include_past_rows }, ctx) {
+    const data = await loadRsuData(ctx);
+    const prices = priceByTicker(data.prices);
     const today = ctx.today();
-    const priceByTicker = new Map(
-      prices.map(price => [normalizeTicker(price.id), price] as const),
-    );
 
-    const grantRows = grants.map(grant => {
-      const price = priceByTicker.get(normalizeTicker(grant.ticker)) ?? null;
-      const grantEvents = events
-        .filter(event => event.grant_id === grant.id)
-        .sort((a, b) => a.vest_date.localeCompare(b.vest_date));
-      const rows = grantEvents.map(event => {
-        const value = vestEventValue(event, grant, price);
-        return {
-          id: event.id,
-          vest_date: event.vest_date,
-          shares: event.shares,
-          vest_price:
-            event.actual_price == null ? null : toMajor(event.actual_price),
-          est_gross: value ? toMajor(value.gross) : null,
-          est_net: value ? toMajor(value.net) : null,
-          basis: value?.basis ?? null,
-          actual_net:
-            event.actual_net == null ? null : toMajor(event.actual_net),
-          schedule_id: event.schedule,
-        };
-      });
-      const payout = summarizeGrantPayout(grant, grantEvents, price, today);
-      return {
-        id: grant.id,
-        name: grant.name,
-        ticker: normalizeTicker(grant.ticker),
-        grant_date: grant.grant_date,
-        total_shares: grant.total_shares,
-        account_id: grant.account,
-        payee_id: grant.payee,
-        category_id: grant.category,
-        withholding_rate: grant.withholding_rate,
-        paid_out_net: toMajor(payout.paidOut),
-        remaining_est_net: toMajor(payout.remaining),
-        unvalued_rows: payout.unvaluedCount,
-        vest_events: rows,
-      };
-    });
+    let grants = data.grants;
+    if (grant) {
+      grants = [resolveGrant(data.grants, grant)];
+    }
+    if (ticker) {
+      const wanted = normalizeTicker(ticker);
+      grants = grants.filter(g => normalizeTicker(g.ticker) === wanted);
+    }
 
-    const priceRows = prices.map(price => ({
-      ticker: normalizeTicker(price.id),
-      price: toMajor(price.price),
-      currency: price.currency,
-      as_of: price.as_of,
-      source: price.source,
-      manual_override: price.manual_override,
-    }));
-
-    const lines: string[] = [];
-    for (const grant of grantRows) {
-      lines.push(
-        `${grant.name} (${grant.ticker}): ${grant.total_shares} shares, ${Math.round(grant.withholding_rate * 100)}% withheld, ${format(grant.paid_out_net)} paid out, ~${format(grant.remaining_est_net)} still to vest` +
-          (grant.unvalued_rows > 0
-            ? ` (${grant.unvalued_rows} rows without a price)`
-            : '') +
-          ` [id: ${grant.id}]`,
+    const grantRows = grants.map(g => {
+      const view = buildGrantView(
+        ctx,
+        g,
+        data.events,
+        prices.get(normalizeTicker(g.ticker)) ?? null,
       );
-      for (const row of grant.vest_events) {
-        if (row.vest_date < today) continue;
-        lines.push(
-          `  ${row.vest_date}: ${row.shares} shares` +
-            (row.est_net == null ? '' : ` → ~${format(row.est_net)} net`),
-        );
-      }
+      return include_past_rows
+        ? view
+        : {
+            ...view,
+            vest_events: view.vest_events.filter(row => row.vest_date >= today),
+          };
+    });
+    const tickers = new Set(grantRows.map(g => g.ticker));
+    const priceRows = data.prices
+      .filter(
+        price => tickers.size === 0 || tickers.has(normalizeTicker(price.id)),
+      )
+      .map(price => buildPriceView(ctx, price));
+    const monthly =
+      year == null ? null : monthlyIncome(ctx, data, grants, year);
+
+    const { format } = ctx.amounts;
+    const lines: string[] = [];
+    for (const row of grantRows) {
+      lines.push(...describeGrant(ctx, row, { upcomingOnly: true }));
     }
     for (const price of priceRows) {
       lines.push(
@@ -175,9 +118,14 @@ export const getRsuGrants = defineTool({
           (price.as_of ? ` as of ${price.as_of}` : ''),
       );
     }
+    if (monthly) {
+      lines.push(
+        `${monthly.year} net by month: ${monthly.totals.map(format).join(', ')} (total ${format(monthly.grand_total)})`,
+      );
+    }
 
     return {
-      data: { grants: grantRows, prices: priceRows },
+      data: { grants: grantRows, prices: priceRows, monthly },
       text: lines.length > 0 ? lines.join('\n') : 'No RSU grants.',
     };
   },

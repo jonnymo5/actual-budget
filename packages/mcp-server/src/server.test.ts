@@ -45,14 +45,20 @@ const READ_TOOLS = [
 const WRITE_TOOLS = [
   'apply_rules_retroactively',
   'categorize_transactions',
+  'create_rsu_grant',
   'create_rule',
   'create_schedules',
+  'delete_rsu_grant',
   'delete_rule',
   'import_transactions',
   'link_transfers',
+  'lock_rsu_vest_prices',
+  'match_rsu_deposits',
   'move_transfers',
   'refresh_stock_prices',
   'set_budget_amounts',
+  'set_stock_price',
+  'update_rsu_grant',
   'update_rule',
   'update_transaction',
 ];
@@ -64,8 +70,10 @@ const REPORT_MONEY = [
   'apply_rules_retroactively',
   'cash_flow_projection',
   'categorize_transactions',
+  'create_rsu_grant',
   'create_rule',
   'create_schedules',
+  'delete_rsu_grant',
   'delete_rule',
   'detect_recurring',
   'find_outliers',
@@ -80,6 +88,8 @@ const REPORT_MONEY = [
   'import_transactions',
   'link_transfers',
   'list_accounts',
+  'lock_rsu_vest_prices',
+  'match_rsu_deposits',
   'month_comparison',
   'move_transfers',
   'parse_ofx',
@@ -87,8 +97,10 @@ const REPORT_MONEY = [
   'reconcile_account',
   'run_query',
   'set_budget_amounts',
+  'set_stock_price',
   'spending_summary',
   'spending_trends',
+  'update_rsu_grant',
   'update_rule',
   'update_transaction',
 ];
@@ -97,8 +109,10 @@ const REPORT_MONEY = [
 const REPORT_DATES: Record<string, RegExp> = {
   apply_rules_retroactively: /YYYY-MM-DD/,
   cash_flow_projection: /YYYY-MM-DD/,
+  create_rsu_grant: /YYYY-MM-DD/,
   create_rule: /YYYY-MM-DD/,
   create_schedules: /YYYY-MM-DD/,
+  delete_rsu_grant: /YYYY-MM-DD/,
   delete_rule: /YYYY-MM-DD/,
   detect_recurring: /YYYY-MM-DD/,
   find_outliers: /YYYY-MM-DD/,
@@ -113,6 +127,8 @@ const REPORT_DATES: Record<string, RegExp> = {
   get_uncategorized: /YYYY-MM-DD/,
   import_transactions: /YYYY-MM-DD/,
   link_transfers: /YYYY-MM-DD/,
+  lock_rsu_vest_prices: /YYYY-MM-DD/,
+  match_rsu_deposits: /YYYY-MM-DD/,
   month_comparison: /YYYY-MM/,
   move_transfers: /YYYY-MM-DD/,
   parse_ofx: /YYYY-MM-DD/,
@@ -122,6 +138,7 @@ const REPORT_DATES: Record<string, RegExp> = {
   set_budget_amounts: /YYYY-MM/,
   spending_summary: /YYYY-MM-DD/,
   spending_trends: /YYYY-MM/,
+  update_rsu_grant: /YYYY-MM-DD/,
   update_rule: /YYYY-MM-DD/,
   update_transaction: /YYYY-MM-DD/,
 };
@@ -163,7 +180,7 @@ describe('the tools on offer', () => {
       );
       // Only a deletion asks for confirmation as well.
       expect('confirm' in properties, tool.name).toBe(
-        tool.name === 'delete_rule',
+        ['delete_rule', 'delete_rsu_grant'].includes(tool.name),
       );
     }
     await close();
