@@ -45,6 +45,44 @@ export type DbAccountGroup = {
   tombstone: 1 | 0;
 };
 
+export type DbRsuGrant = {
+  id: string;
+  name: string;
+  ticker: string;
+  grant_date: number | null;
+  total_shares: number;
+  account: string;
+  category: string | null;
+  payee: string;
+  withholding_rate: number;
+  notes: string | null;
+  sort_order: number | null;
+  tombstone: 1 | 0;
+};
+
+export type DbRsuVestEvent = {
+  id: string;
+  grant_id: string;
+  vest_date: number;
+  shares: number;
+  schedule: string | null;
+  actual_price: number | null;
+  actual_net: number | null;
+  notes: string | null;
+  tombstone: 1 | 0;
+};
+
+export type DbStockPrice = {
+  id: string;
+  price: number;
+  currency: string | null;
+  as_of: string | null;
+  updated_at: string | null;
+  source: string | null;
+  manual_override: 1 | 0;
+  tombstone: 1 | 0;
+};
+
 export type DbBank = {
   id: string;
   bank_id: string;

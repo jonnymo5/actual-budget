@@ -132,6 +132,7 @@ export const schema = {
     _conditions: f('json'),
     _actions: f('json'),
     _has_splits: f('boolean'),
+    _rsu_vest_event: f('id', { ref: 'rsu_vest_events' }),
   },
   rules: {
     id: f('id'),
@@ -224,6 +225,41 @@ export const schema = {
     created_at: f('integer', { required: true }),
     tombstone: f('boolean'),
   },
+  rsu_grants: {
+    id: f('id'),
+    name: f('string'),
+    ticker: f('string'),
+    grant_date: f('date'),
+    total_shares: f('float'),
+    account: f('id', { ref: 'accounts' }),
+    category: f('id', { ref: 'categories' }),
+    payee: f('id', { ref: 'payees' }),
+    withholding_rate: f('float'),
+    notes: f('string'),
+    sort_order: f('float'),
+    tombstone: f('boolean'),
+  },
+  rsu_vest_events: {
+    id: f('id'),
+    grant_id: f('id', { ref: 'rsu_grants' }),
+    vest_date: f('date'),
+    shares: f('float'),
+    schedule: f('id', { ref: 'schedules' }),
+    actual_price: f('integer'),
+    actual_net: f('integer'),
+    notes: f('string'),
+    tombstone: f('boolean'),
+  },
+  stock_prices: {
+    id: f('id'),
+    price: f('integer'),
+    currency: f('string'),
+    as_of: f('string'),
+    updated_at: f('string'),
+    source: f('string'),
+    manual_override: f('boolean'),
+    tombstone: f('boolean'),
+  },
 };
 
 export const schemaConfig: SchemaConfig = {
@@ -298,6 +334,12 @@ export const schemaConfig: SchemaConfig = {
           return ['sort_order', 'id'];
         case 'schedules':
           return [{ $condition: { completed: true } }, 'next_date'];
+        case 'rsu_grants':
+          return ['grant_date', 'id'];
+        case 'rsu_vest_events':
+          return ['vest_date', 'id'];
+        case 'stock_prices':
+          return ['id'];
         default:
       }
 
@@ -358,6 +400,11 @@ export const schemaConfig: SchemaConfig = {
             SELECT 1
             FROM json_each(_rules.actions) action
             WHERE json_extract(action.value, '$.options.splitIndex') > 0
+          )`,
+          _rsu_vest_event: `(
+            SELECT _rsu.id FROM rsu_vest_events _rsu
+            WHERE _rsu.schedule = _.id AND _rsu.tombstone = 0
+            LIMIT 1
           )`,
         });
 

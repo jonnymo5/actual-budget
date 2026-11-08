@@ -17,6 +17,7 @@ import * as openidApp from './app-openid';
 import * as pluggai from './app-pluggyai/app-pluggyai';
 import * as secretApp from './app-secrets';
 import * as simpleFinApp from './app-simplefin/app-simplefin';
+import * as stockQuoteApp from './app-stock-quote/app-stock-quote';
 import * as syncApp from './app-sync';
 import { config } from './load-config';
 
@@ -60,6 +61,7 @@ app.use('/sync', syncApp.handlers);
 app.use('/account', accountApp.handlers);
 app.use('/gocardless', goCardlessApp.handlers);
 app.use('/simplefin', simpleFinApp.handlers);
+app.use('/stock-quote', stockQuoteApp.handlers);
 app.use('/pluggyai', pluggai.handlers);
 app.use('/akahu', akahuApp.handlers);
 app.use('/enablebanking', enableBankingApp.handlers);

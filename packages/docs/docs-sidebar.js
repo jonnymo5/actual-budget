@@ -117,6 +117,7 @@ const sidebars = {
         // End of Budgeting
 
         'schedules',
+        'rsu-grants',
 
         {
           type: 'category',

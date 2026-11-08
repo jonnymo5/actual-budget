@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import {
+  SvgChartBar,
   SvgLibrary,
   SvgReports,
   SvgTag,
@@ -36,6 +37,7 @@ export function PrimaryNav() {
       <NavRow title={t('Schedules')} Icon={SvgCalendar3} to="/schedules" />
       <NavRow title={t('Payees')} Icon={SvgUserGroup} to="/payees" />
       <NavRow title={t('Rules')} Icon={SvgTuning} to="/rules" />
+      <NavRow title={t('RSU Grants')} Icon={SvgChartBar} to="/rsu" />
       {isUsingServer && (
         <NavRow title={t('Bank Sync')} Icon={SvgLibrary} to="/bank-sync" />
       )}

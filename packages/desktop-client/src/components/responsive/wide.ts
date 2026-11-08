@@ -3,6 +3,8 @@ export { Budget } from '#components/budget';
 export { Schedules } from '#components/schedules';
 export { Schedules as ScheduleEdit } from '#components/schedules';
 
+export { RsuPage as Rsu } from '#components/rsu/RsuPage';
+
 export { GoCardlessLink } from '#components/gocardless/GoCardlessLink';
 
 export { Account as Accounts } from '#components/accounts/Account';
