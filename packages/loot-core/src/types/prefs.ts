@@ -66,6 +66,7 @@ export type SyncedPrefs = Partial<
     | `flip-amount-${string}-${'csv' | 'qif'}`
     | `flags.${FeatureFlag}`
     | `learn-categories`
+    | 'rsu-budget-sync'
     | `show-hidden-tags`,
     string
   >
@@ -86,6 +87,7 @@ export type MetadataPrefs = Partial<{
   resetClock: boolean;
   lastScheduleRun: string;
   lastRsuPriceRefresh: string;
+  lastRsuBudgetSync: string;
   userId: string; // TODO: delete this (unused)
 }>;
 

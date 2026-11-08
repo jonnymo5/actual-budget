@@ -29,6 +29,7 @@ import { lockRsuVestPrices } from './rsu/lock-rsu-vest-prices';
 import { matchRsuDeposits } from './rsu/match-rsu-deposits';
 import { refreshStockPrices } from './rsu/refresh-stock-prices';
 import { setStockPrice } from './rsu/set-stock-price';
+import { syncRsuBudget } from './rsu/sync-rsu-budget';
 import { updateRsuGrant } from './rsu/update-rsu-grant';
 import { applyRulesRetroactively } from './rules/apply-rules-retroactively';
 import { createRule } from './rules/create-rule';
@@ -74,6 +75,7 @@ export const allTools: ToolDefinition[] = [
   setStockPrice,
   matchRsuDeposits,
   lockRsuVestPrices,
+  syncRsuBudget,
   previewRule,
   createRule,
   updateRule,

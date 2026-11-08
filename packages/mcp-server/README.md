@@ -22,7 +22,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                                                |
 | Budget      | `set_budget_amounts`                                                                                                                                                                                                                          |
 | Schedules   | `create_schedules`                                                                                                                                                                                                                            |
-| RSU grants  | `create_rsu_grant`, `update_rsu_grant`, `delete_rsu_grant`, `set_stock_price`, `refresh_stock_prices`, `lock_rsu_vest_prices`, `match_rsu_deposits`                                                                                           |
+| RSU grants  | `create_rsu_grant`, `update_rsu_grant`, `delete_rsu_grant`, `set_stock_price`, `refresh_stock_prices`, `lock_rsu_vest_prices`, `match_rsu_deposits`, `sync_rsu_budget`                                                                        |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                                      |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                                       |
 
@@ -103,6 +103,9 @@ estimates use.
   grant's payee and records them, after showing the pairings in its preview.
 - `get_rsu_grants` takes `grant`, `ticker` and `year`; with a year it also
   returns the net per calendar month, the same grid the RSU Grants page shows.
+- `sync_rsu_budget` budgets the income categories RSU deposits land in, from
+  this month to a year ahead, with the summed net of every vest in each month
+  (tracking budgets only). `auto` turns the daily sync on or off.
 
 ### Transfers
 

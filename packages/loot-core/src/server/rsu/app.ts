@@ -4,6 +4,7 @@ import * as asyncStorage from '#platform/server/asyncStorage';
 import { logger } from '#platform/server/log';
 import { createApp } from '#server/app';
 import { aqlQuery } from '#server/aql';
+import { getBudget, isTrackingBudget, setBudget } from '#server/budget/actions';
 import * as db from '#server/db';
 import { PostError } from '#server/errors';
 import { mutator, runMutator } from '#server/mutators';
@@ -18,7 +19,14 @@ import {
 import { getServer } from '#server/server-config';
 import { updateRule } from '#server/transactions/transaction-rules';
 import { undoable } from '#server/undo';
-import { addDays, currentDay, subDays } from '#shared/months';
+import {
+  addDays,
+  addMonths,
+  currentDay,
+  currentMonth,
+  rangeInclusive,
+  subDays,
+} from '#shared/months';
 import { q } from '#shared/query';
 import {
   clampWithholdingRate,
@@ -27,6 +35,7 @@ import {
   isValidTicker,
   normalizeTicker,
   planDepositMatches,
+  planRsuBudget,
   roundShares,
   rsuScheduleName,
   vestEventNet,
@@ -115,6 +124,29 @@ export type RsuMatchResult = {
   unmatched: string[];
 };
 
+export type RsuBudgetChange = {
+  category: string;
+  /** YYYY-MM */
+  month: string;
+  /** Integer cents */
+  before: number;
+  /** Integer cents */
+  after: number;
+};
+
+export type RsuBudgetSyncResult = {
+  changes: RsuBudgetChange[];
+  /** Category months that already held the right amount */
+  unchanged: number;
+  /** Months left alone because a vest in them has no price yet */
+  unpriced: Array<{ category: string; month: string; ticker: string }>;
+  /** Grants whose deposit category is missing or is not an income category */
+  ignoredGrants: string[];
+  /** Set when nothing could be budgeted at all */
+  skipped?: 'envelope-budget';
+  dryRun: boolean;
+};
+
 type StockHistoryResponse = {
   symbol: string;
   currency: string | null;
@@ -135,6 +167,7 @@ export type RsuHandlers = {
   'rsu/set-price': typeof setPrice;
   'rsu/refresh-prices': typeof refreshPrices;
   'rsu/sync-schedules': typeof syncSchedules;
+  'rsu/sync-budget': typeof syncBudget;
 };
 
 export const app = createApp<RsuHandlers>();
@@ -150,6 +183,7 @@ app.method('rsu/refresh-prices', mutator(refreshPrices));
 app.method('rsu/lock-vest-prices', mutator(lockVestPrices));
 app.method('rsu/match-deposits', mutator(undoable(matchDeposits)));
 app.method('rsu/sync-schedules', mutator(undoable(syncSchedules)));
+app.method('rsu/sync-budget', mutator(undoable(syncBudget)));
 
 // Reads
 
@@ -997,19 +1031,103 @@ export async function syncSchedules({
   return total;
 }
 
-// Refresh prices once a day, after the first successful sync of the day.
+// Budget
+
+/** Synced preference that turns on the daily budget sync ('true' or unset). */
+export const RSU_BUDGET_SYNC_PREF = 'rsu-budget-sync';
+
+/** How many months ahead the budget is kept, matching the budget's own range. */
+const BUDGET_MONTHS_AHEAD = 12;
+
+export function isBudgetSyncEnabled(): boolean {
+  const row = db.firstSync<Pick<db.DbPreference, 'value'>>(
+    'SELECT value FROM preferences WHERE id = ?',
+    [RSU_BUDGET_SYNC_PREF],
+  );
+  return row?.value === 'true';
+}
+
+/**
+ * Budget the income categories that RSU deposits land in, from this month to
+ * a year ahead: each month gets the summed net of every vest dated in it,
+ * across all grants in that category, and 0 when nothing vests. The sync owns
+ * those categories, so whatever was budgeted there before is replaced. Past
+ * months are never touched. Only a tracking budget can budget income.
+ */
+export async function syncBudget({
+  dryRun = false,
+}: { dryRun?: boolean } = {}): Promise<RsuBudgetSyncResult> {
+  const result: RsuBudgetSyncResult = {
+    changes: [],
+    unchanged: 0,
+    unpriced: [],
+    ignoredGrants: [],
+    dryRun,
+  };
+  if (!isTrackingBudget()) {
+    result.skipped = 'envelope-budget';
+    return result;
+  }
+
+  const incomeCategories = new Set(
+    (
+      await db.all<Pick<db.DbCategory, 'id'>>(
+        'SELECT id FROM categories WHERE is_income = 1 AND tombstone = 0',
+      )
+    ).map(category => category.id),
+  );
+  const { grants, events, prices } = await getRsuData();
+  const budgeted = grants.filter(grant => {
+    const ok = !!grant.category && incomeCategories.has(grant.category);
+    if (!ok) {
+      result.ignoredGrants.push(grant.id);
+    }
+    return ok;
+  });
+
+  const thisMonth = currentMonth();
+  const plan = planRsuBudget({
+    grants: budgeted,
+    events,
+    prices,
+    months: rangeInclusive(
+      thisMonth,
+      addMonths(thisMonth, BUDGET_MONTHS_AHEAD),
+    ),
+  });
+  result.unpriced = plan.unpriced;
+
+  for (const { category, month, amount } of plan.amounts) {
+    const before = getBudget({ category, month });
+    if (before === amount) {
+      result.unchanged += 1;
+      continue;
+    }
+    result.changes.push({ category, month, before, after: amount });
+    if (!dryRun) {
+      await setBudget({ category, month, amount });
+    }
+  }
+  return result;
+}
+
+// Once a day, after the first successful sync of the day: refresh prices, then
+// (when turned on) rebudget the RSU income so it follows the new prices.
 app.events.on('sync', ({ type }) => {
   if (type !== 'success' || !prefs.getPrefs() || !db.getDatabase()) {
     return;
   }
-  const { lastRsuPriceRefresh } = prefs.getPrefs();
-  if (lastRsuPriceRefresh === currentDay()) {
+  const today = currentDay();
+  const { lastRsuPriceRefresh, lastRsuBudgetSync } = prefs.getPrefs();
+  const pricesDue = lastRsuPriceRefresh !== today;
+  const budgetDue = isBudgetSyncEnabled() && lastRsuBudgetSync !== today;
+  if (!pricesDue && !budgetDue) {
     return;
   }
 
   void runMutator(async () => {
     // The budget may have been closed while this waited its turn.
-    if (!db.getDatabase() || !getServer()) {
+    if (!db.getDatabase()) {
       return;
     }
     try {
@@ -1019,13 +1137,26 @@ app.events.on('sync', ({ type }) => {
       if (!hasGrants) {
         return;
       }
-      const result = await refreshPrices({});
-      const lock = await lockVestPrices({});
-      if (!result.error && !lock.error) {
-        await prefs.savePrefs({ lastRsuPriceRefresh: currentDay() });
+
+      let pricesUpdated = false;
+      if (prefs.getPrefs().lastRsuPriceRefresh !== today && getServer()) {
+        const result = await refreshPrices({});
+        const lock = await lockVestPrices({});
+        if (!result.error && !lock.error) {
+          await prefs.savePrefs({ lastRsuPriceRefresh: today });
+        }
+        pricesUpdated = result.updated.length > 0 || lock.locked.length > 0;
+      }
+
+      if (
+        isBudgetSyncEnabled() &&
+        (pricesUpdated || prefs.getPrefs().lastRsuBudgetSync !== today)
+      ) {
+        await syncBudget({});
+        await prefs.savePrefs({ lastRsuBudgetSync: today });
       }
     } catch (error) {
-      logger.warn('Daily stock price refresh failed', error);
+      logger.warn('Daily RSU refresh failed', error);
     }
   });
 });
