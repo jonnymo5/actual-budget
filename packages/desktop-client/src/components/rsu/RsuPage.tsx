@@ -12,6 +12,7 @@ import type { RsuGrantEntity } from '@actual-app/core/types/models';
 import { FeatureErrorFallback } from '#components/FeatureErrorFallback';
 import { Page } from '#components/Page';
 import { pushModal } from '#modals/modalsSlice';
+import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 
 import { RsuGrantsTable } from './RsuGrantsTable';
@@ -46,6 +47,25 @@ export function RsuPage() {
       case 'sync':
         await send('rsu/sync-schedules', { grantId: id });
         break;
+      case 'match-deposits': {
+        const result = await send('rsu/match-deposits', { grantId: id });
+        dispatch(
+          addNotification({
+            notification: {
+              type: result.matched.length > 0 ? 'message' : 'warning',
+              message:
+                result.matched.length > 0
+                  ? t('Recorded {{count}} deposits as actual vest income.', {
+                      count: result.matched.length,
+                    })
+                  : t(
+                      'No unmatched deposits were found near the past vest dates.',
+                    ),
+            },
+          }),
+        );
+        break;
+      }
       case 'delete':
         await send('rsu-grant/delete', { id });
         break;

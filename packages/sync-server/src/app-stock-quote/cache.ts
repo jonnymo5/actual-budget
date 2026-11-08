@@ -1,5 +1,5 @@
 import { isStockQuote } from './providers';
-import type { StockQuoteResult } from './providers';
+import type { PriceHistory, StockQuoteResult } from './providers';
 
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const NEGATIVE_TTL_MS = 2 * 60 * 1000;
@@ -35,4 +35,34 @@ export function setCachedQuote(
 /** For tests. */
 export function clearQuoteCache(): void {
   cache.clear();
+  historyCache.clear();
+}
+
+const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+type HistoryEntry = { value: PriceHistory; expiresAt: number };
+
+const historyCache = new Map<string, HistoryEntry>();
+
+export function getCachedHistory(
+  key: string,
+  now: number = Date.now(),
+): PriceHistory | null {
+  const entry = historyCache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= now) {
+    historyCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+export function setCachedHistory(
+  key: string,
+  value: PriceHistory,
+  now: number = Date.now(),
+): void {
+  historyCache.set(key, { value, expiresAt: now + HISTORY_TTL_MS });
 }

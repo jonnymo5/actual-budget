@@ -59,6 +59,32 @@ function textResponse(status: number, text: string) {
 
 const fetchMock = vi.fn();
 
+function yahooHistoryBody(days: Array<[string, number]>, gmtoffset = -18000) {
+  // Yahoo stamps each day with the market open in the exchange's time zone.
+  const timestamp = days.map(([date]) =>
+    Math.floor(new Date(`${date}T14:30:00Z`).getTime() / 1000),
+  );
+  return {
+    chart: {
+      result: [
+        {
+          meta: { currency: 'USD', gmtoffset },
+          timestamp,
+          indicators: { quote: [{ close: days.map(([, close]) => close) }] },
+        },
+      ],
+      error: null,
+    },
+  };
+}
+
+function postHistory(body: object) {
+  return request(app)
+    .post('/history')
+    .set('x-actual-token', 'valid-token')
+    .send(body);
+}
+
 function postQuotes(symbols: unknown) {
   return request(app)
     .post('/quotes')
@@ -192,5 +218,87 @@ describe('/stock-quote/quotes', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res.body.data.quotes[0].cached).toBe(true);
+  });
+});
+
+describe('/stock-quote/history', () => {
+  beforeEach(() => {
+    clearQuoteCache();
+    fetchMock.mockReset();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects malformed requests', async () => {
+    for (const body of [
+      {},
+      { symbol: 'ABCD', dates: [] },
+      { symbol: 'ABCD', dates: ['2025-13-01'] },
+      { symbol: '../x', dates: ['2025-01-02'] },
+      { symbol: 'ABCD', dates: Array.from({ length: 61 }, () => '2025-01-02') },
+    ]) {
+      const res = await postHistory(body);
+      expect(res.statusCode).toBe(400);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns the close on each date, or the last trading day before it', async () => {
+    fetchMock.mockImplementation(() =>
+      jsonResponse(
+        200,
+        yahooHistoryBody([
+          ['2025-01-02', 100],
+          ['2025-01-03', 101],
+          ['2025-01-06', 102],
+        ]),
+      ),
+    );
+
+    const res = await postHistory({
+      symbol: 'abcd',
+      // A Friday, a Saturday (market shut) and a date before any data
+      dates: ['2025-01-03', '2025-01-04', '2024-12-20'],
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data).toEqual({
+      symbol: 'ABCD',
+      currency: 'USD',
+      closes: [
+        { date: '2025-01-03', close: 101, close_date: '2025-01-03' },
+        { date: '2025-01-04', close: 101, close_date: '2025-01-03' },
+      ],
+      errors: [{ date: '2024-12-20', reason: 'not-found' }],
+    });
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/chart/ABCD?period1=');
+    expect(url).toContain('interval=1d');
+  });
+
+  it('reuses one fetch for the same symbol and range', async () => {
+    fetchMock.mockImplementation(() =>
+      jsonResponse(200, yahooHistoryBody([['2025-01-02', 100]])),
+    );
+
+    await postHistory({ symbol: 'ABCD', dates: ['2025-01-02'] });
+    await postHistory({ symbol: 'ABCD', dates: ['2025-01-02'] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports provider failures per date without failing the request', async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error('offline')));
+
+    const res = await postHistory({ symbol: 'ABCD', dates: ['2025-01-02'] });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.errors).toEqual([
+      { date: '2025-01-02', reason: 'provider-error' },
+    ]);
   });
 });

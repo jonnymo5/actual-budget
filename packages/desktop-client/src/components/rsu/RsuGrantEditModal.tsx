@@ -7,10 +7,11 @@ import { Input } from '@actual-app/components/input';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
-import { sendCatch } from '@actual-app/core/platform/client/connection';
+import { send, sendCatch } from '@actual-app/core/platform/client/connection';
 import {
   normalizeTicker,
   roundShares,
+  summarizeGrantPayout,
   sumShares,
 } from '@actual-app/core/shared/rsu';
 import type { RsuVestRow } from '@actual-app/core/types/models';
@@ -20,7 +21,10 @@ import { FormField, FormLabel } from '#components/forms';
 import { DateSelect } from '#components/select/DateSelect';
 import { GenericInput } from '#components/util/GenericInput';
 import { PercentInput } from '#components/util/PercentInput';
+import { useCategories } from '#hooks/useCategories';
 import { useDateFormat } from '#hooks/useDateFormat';
+import { useFormat } from '#hooks/useFormat';
+import { usePayees } from '#hooks/usePayees';
 import type { Modal as ModalType } from '#modals/modalsSlice';
 
 import { useRsuData } from './useRsuData';
@@ -48,6 +52,11 @@ type GrantDraft = {
 export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
   const { t } = useTranslation();
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
+  const format = useFormat();
+  // The pickers only read their lists when they mount, so wait for them.
+  const { data: payees } = usePayees();
+  const { data: categoryData } = useCategories();
+  const arePickersReady = payees != null && categoryData != null;
   const {
     grants,
     eventsByGrant,
@@ -103,6 +112,7 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
         id: event.id,
         vest_date: event.vest_date,
         shares: event.shares,
+        actual_price: event.actual_price,
         actual_net: event.actual_net,
         schedule: event.schedule,
       })),
@@ -121,6 +131,7 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
         key: newRowKey(),
         vest_date: row.vest_date,
         shares: row.shares,
+        actual_price: null,
         actual_net: null,
         schedule: null,
       })),
@@ -145,6 +156,7 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
       id: row.id,
       vest_date: row.vest_date,
       shares: row.shares,
+      actual_price: row.actual_price,
       actual_net: row.actual_net,
     }));
     const grantFields = {
@@ -179,11 +191,22 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
       );
       return;
     }
+    // Freeze the price of rows that have already vested; best effort.
+    void send('rsu/lock-vest-prices', { grantId: result.data });
     close();
   }
 
+  const payout = grant
+    ? summarizeGrantPayout(
+        { withholding_rate: grant.withholding_rate },
+        rows,
+        price ? { price: price.price } : null,
+        today,
+      )
+    : null;
+
   return (
-    <Modal name="rsu-grant-edit" containerProps={{ style: { width: 900 } }}>
+    <Modal name="rsu-grant-edit" containerProps={{ style: { width: 960 } }}>
       {({ state }) => (
         <>
           <ModalHeader
@@ -278,40 +301,47 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
                 </FormField>
                 <FormField>
                   <FormLabel title={t('Payee')} />
-                  <GenericInput
-                    type="id"
-                    field="payee"
-                    value={grant.payee}
-                    onChange={payee => patch({ payee })}
-                  />
+                  {arePickersReady && (
+                    <GenericInput
+                      type="id"
+                      field="payee"
+                      value={grant.payee}
+                      onChange={payee => patch({ payee })}
+                    />
+                  )}
                 </FormField>
                 <FormField>
                   <FormLabel title={t('Deposit account')} />
-                  <GenericInput
-                    type="id"
-                    field="account"
-                    value={grant.account}
-                    onChange={account => patch({ account })}
-                  />
+                  {arePickersReady && (
+                    <GenericInput
+                      type="id"
+                      field="account"
+                      value={grant.account}
+                      onChange={account => patch({ account })}
+                    />
+                  )}
                 </FormField>
                 <FormField>
                   <FormLabel title={t('Income category')} />
-                  <GenericInput
-                    type="id"
-                    field="category"
-                    value={grant.category ?? ''}
-                    onChange={(category: string) =>
-                      patch({ category: category || null })
-                    }
-                  />
+                  {arePickersReady && (
+                    <GenericInput
+                      type="id"
+                      field="category"
+                      value={grant.category ?? ''}
+                      onChange={(category: string) =>
+                        patch({ category: category || null })
+                      }
+                    />
+                  )}
                 </FormField>
               </View>
 
               <Text style={{ color: theme.pageTextSubdued, fontSize: 13 }}>
                 <Trans>
                   Each future vest row becomes a schedule for its estimated net
-                  (shares × price, less withholding). Rows in the past get no
-                  schedule; record their actual net instead.
+                  (shares × price, less withholding). Once a row vests, its
+                  share price is locked at that day's close, and you can record
+                  the actual net that was deposited.
                 </Trans>
               </Text>
 
@@ -331,6 +361,23 @@ export function RsuGrantEditModal({ id }: RsuGrantEditModalProps) {
                 statusByEvent={statusByEvent}
                 today={today}
               />
+
+              {payout && rows.length > 0 && (
+                <Text style={{ color: theme.pageTextSubdued, fontSize: 13 }}>
+                  {t(
+                    'Paid out so far: {{paid}} · Still to vest: {{remaining}}',
+                    {
+                      paid: format(payout.paidOut, 'financial'),
+                      remaining: format(payout.remaining, 'financial'),
+                    },
+                  )}
+                  {payout.unvaluedCount > 0 &&
+                    ' ' +
+                      t('({{count}} rows have no price yet)', {
+                        count: payout.unvaluedCount,
+                      })}
+                </Text>
+              )}
 
               {error && <Text style={{ color: theme.errorText }}>{error}</Text>}
 
