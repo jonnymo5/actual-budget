@@ -202,6 +202,8 @@ function ScheduleRow({
             name: 'delete',
             text: t('Delete'),
             onClick: () => onAction('delete', schedule.id),
+            // Schedules owned by an RSU grant are removed through the grant
+            hidden: !!schedule._rsu_vest_event,
           },
         ]
       : [],
@@ -221,16 +223,37 @@ function ScheduleRow({
       }}
     >
       <Field width="flex" name="name">
-        <Text
-          style={
-            schedule.name == null
-              ? { color: theme.buttonNormalDisabledText }
-              : null
-          }
-          title={schedule.name ? schedule.name : ''}
-        >
-          {schedule.name ? schedule.name : t('None')}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              ...(schedule.name == null
+                ? { color: theme.buttonNormalDisabledText }
+                : null),
+            }}
+            title={schedule.name ? schedule.name : ''}
+          >
+            {schedule.name ? schedule.name : t('None')}
+          </Text>
+          {schedule._rsu_vest_event && (
+            <Text
+              title={t('Managed by an RSU grant')}
+              style={{
+                flexShrink: 0,
+                fontSize: 10,
+                fontWeight: 600,
+                padding: '1px 5px',
+                borderRadius: 3,
+                color: theme.noticeText,
+                backgroundColor: theme.noticeBackgroundLight,
+              }}
+            >
+              {t('RSU')}
+            </Text>
+          )}
+        </View>
       </Field>
       <Field width="flex" name="payee">
         <DisplayId type="payees" id={schedule._payee} />

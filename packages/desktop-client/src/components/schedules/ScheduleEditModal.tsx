@@ -4,6 +4,9 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
 import { SpaceBetween } from '@actual-app/components/space-between';
+import { Text } from '@actual-app/components/text';
+import { theme } from '@actual-app/components/theme';
+import { View } from '@actual-app/components/view';
 import { send, sendCatch } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
@@ -14,9 +17,10 @@ import type {
 
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { usePayeesById } from '#hooks/usePayees';
+import { useQuery } from '#hooks/useQuery';
 import { useScheduleEdit } from '#hooks/useScheduleEdit';
 import { useSelected } from '#hooks/useSelected';
-import { pushModal } from '#modals/modalsSlice';
+import { pushModal, replaceModal } from '#modals/modalsSlice';
 import type { Modal as ModalType } from '#modals/modalsSlice';
 import { aqlQuery } from '#queries/aqlQuery';
 import { useDispatch } from '#redux';
@@ -85,6 +89,19 @@ export function ScheduleEditModal({ id, transaction }: ScheduleEditModalProps) {
     initialSchedule,
     transactionId: transaction?.id,
   });
+
+  // Schedules owned by an RSU grant are edited through the grant instead.
+  const rsuVestEventId = state.schedule?._rsu_vest_event ?? null;
+  const { data: rsuVestEvents } = useQuery<{ id: string; grant_id: string }>(
+    () =>
+      rsuVestEventId
+        ? q('rsu_vest_events')
+            .filter({ id: rsuVestEventId })
+            .select(['id', 'grant_id'])
+        : null,
+    [rsuVestEventId],
+  );
+  const rsuGrantId = rsuVestEvents?.[0]?.grant_id ?? null;
 
   const selectedInst = useSelected(
     'transactions',
@@ -227,41 +244,86 @@ export function ScheduleEditModal({ id, transaction }: ScheduleEditModalProps) {
               <ModalCloseButton onPress={() => modalState.close()} />
             }
           />
-          <ScheduleEditForm
-            fields={state.fields}
-            dispatch={dispatch}
-            upcomingDates={state.upcomingDates}
-            repeats={repeats}
-            schedule={schedule}
-            adding={adding}
-            isCustom={state.isCustom ?? false}
-            onEditRule={onEditRule}
-            transactions={state.transactions}
-            transactionsMode={state.transactionsMode}
-            error={state.error}
-            selectedInst={selectedInst}
-            onSwitchTransactions={onSwitchTransactions}
-            onLinkTransactions={onLinkTransactions}
-            onUnlinkTransactions={onUnlinkTransactions}
-          />
+          {rsuVestEventId ? (
+            <View style={{ gap: 15 }}>
+              <View
+                style={{
+                  padding: 12,
+                  borderRadius: 6,
+                  backgroundColor: theme.noticeBackgroundLight,
+                  color: theme.noticeText,
+                }}
+              >
+                <Text>
+                  <Trans>
+                    This schedule is managed by an RSU grant. Its amount and
+                    date come from the grant, so edit the grant instead.
+                  </Trans>
+                </Text>
+              </View>
+              <SpaceBetween
+                style={{ justifyContent: 'flex-end', alignItems: 'center' }}
+              >
+                <Button onPress={() => modalState.close()}>
+                  <Trans>Close</Trans>
+                </Button>
+                <Button
+                  variant="primary"
+                  isDisabled={!rsuGrantId}
+                  onPress={() =>
+                    globalDispatch(
+                      replaceModal({
+                        modal: {
+                          name: 'rsu-grant-edit',
+                          options: { id: rsuGrantId ?? undefined },
+                        },
+                      }),
+                    )
+                  }
+                >
+                  <Trans>Open grant</Trans>
+                </Button>
+              </SpaceBetween>
+            </View>
+          ) : (
+            <>
+              <ScheduleEditForm
+                fields={state.fields}
+                dispatch={dispatch}
+                upcomingDates={state.upcomingDates}
+                repeats={repeats}
+                schedule={schedule}
+                adding={adding}
+                isCustom={state.isCustom ?? false}
+                onEditRule={onEditRule}
+                transactions={state.transactions}
+                transactionsMode={state.transactionsMode}
+                error={state.error}
+                selectedInst={selectedInst}
+                onSwitchTransactions={onSwitchTransactions}
+                onLinkTransactions={onLinkTransactions}
+                onUnlinkTransactions={onUnlinkTransactions}
+              />
 
-          <SpaceBetween
-            style={{
-              marginTop: 20,
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-            }}
-          >
-            <Button onPress={() => modalState.close()}>
-              <Trans>Cancel</Trans>
-            </Button>
-            <Button
-              variant="primary"
-              onPress={() => onSave(() => modalState.close())}
-            >
-              {adding ? t('Add') : t('Save')}
-            </Button>
-          </SpaceBetween>
+              <SpaceBetween
+                style={{
+                  marginTop: 20,
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                }}
+              >
+                <Button onPress={() => modalState.close()}>
+                  <Trans>Cancel</Trans>
+                </Button>
+                <Button
+                  variant="primary"
+                  onPress={() => onSave(() => modalState.close())}
+                >
+                  {adding ? t('Add') : t('Save')}
+                </Button>
+              </SpaceBetween>
+            </>
+          )}
         </>
       )}
     </Modal>

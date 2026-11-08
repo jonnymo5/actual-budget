@@ -14,16 +14,17 @@ server.
 All amounts are in major currency units (dollars, not cents); spending is
 negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 
-| Area        | Tools                                                                                                                                                                                                                       |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Look around | `get_overview` (start here), `list_accounts`, `get_categories`, `get_payees`, `get_transactions`, `get_budget_months`, `get_budget_month`, `get_schedules`, `get_rules`, `run_query` (read-only ActualQL for anything else) |
-| Analyse     | `spending_summary`, `spending_trends`, `find_outliers`, `detect_recurring`, `cash_flow_projection`, `month_comparison`                                                                                                      |
-| Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                        |
-| Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                              |
-| Budget      | `set_budget_amounts`                                                                                                                                                                                                        |
-| Schedules   | `create_schedules`                                                                                                                                                                                                          |
-| Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                    |
-| Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                     |
+| Area        | Tools                                                                                                                                                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Look around | `get_overview` (start here), `list_accounts`, `get_categories`, `get_payees`, `get_transactions`, `get_budget_months`, `get_budget_month`, `get_schedules`, `get_rsu_grants`, `get_rules`, `run_query` (read-only ActualQL for anything else) |
+| Analyse     | `spending_summary`, `spending_trends`, `find_outliers`, `detect_recurring`, `cash_flow_projection`, `month_comparison`                                                                                                                        |
+| Categorize  | `get_uncategorized`, `categorize_transactions`, `update_transaction`                                                                                                                                                                          |
+| Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                                                |
+| Budget      | `set_budget_amounts`                                                                                                                                                                                                                          |
+| Schedules   | `create_schedules`                                                                                                                                                                                                                            |
+| RSU grants  | `refresh_stock_prices`                                                                                                                                                                                                                        |
+| Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                                      |
+| Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                                       |
 
 CSV and PDF statements need no server-side parsing: Claude reads them itself
 and passes the rows to `import_transactions`. OFX/QFX files go through
@@ -67,6 +68,23 @@ scheduling the regular flows makes projections exact instead of averaged.
   dates, so dates and weekend moves can be checked before anything is
   created. An entry that cannot be created is skipped with the reason and the
   rest go ahead.
+
+### RSU grants
+
+`get_rsu_grants` lists RSU (restricted stock unit) grants set up in the RSU
+Grants page: each grant's ticker, share count, tax withholding and vest rows,
+with the estimated gross and net cash of every vest (shares × current price,
+less withholding; shares are assumed sold at vest) and the share prices those
+estimates use.
+
+- Every future vest row is also a one-off schedule named
+  `RSU · <grant> · <date>` for its estimated net, so `get_schedules` and
+  `cash_flow_projection` already include RSU income. Those schedules are
+  managed by the grant; change the grant rather than the schedule.
+- `refresh_stock_prices` asks the sync server for current prices and rewrites
+  the schedule amounts. It needs a sync server and skips tickers whose price
+  was set by hand unless `force` is true. The dry run lists the tickers it
+  would fetch.
 
 ### Transfers
 

@@ -16,12 +16,14 @@ import { getBudgetMonths } from './query/get-budget-months';
 import { getCategories } from './query/get-categories';
 import { getOverview } from './query/get-overview';
 import { getPayees } from './query/get-payees';
+import { getRsuGrants } from './query/get-rsu-grants';
 import { getRules } from './query/get-rules';
 import { getSchedules } from './query/get-schedules';
 import { getTransactions } from './query/get-transactions';
 import { listAccounts } from './query/list-accounts';
 import { runQuery } from './query/run-query';
 import type { ToolDefinition } from './registry';
+import { refreshStockPrices } from './rsu/refresh-stock-prices';
 import { applyRulesRetroactively } from './rules/apply-rules-retroactively';
 import { createRule } from './rules/create-rule';
 import { deleteRule } from './rules/delete-rule';
@@ -42,6 +44,7 @@ export const allTools: ToolDefinition[] = [
   getBudgetMonths,
   getBudgetMonth,
   getSchedules,
+  getRsuGrants,
   getRules,
   runQuery,
   spendingSummary,
@@ -58,6 +61,7 @@ export const allTools: ToolDefinition[] = [
   moveTransfers,
   setBudgetAmounts,
   createSchedules,
+  refreshStockPrices,
   previewRule,
   createRule,
   updateRule,

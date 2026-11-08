@@ -85,6 +85,7 @@ import { TransferModal } from './modals/TransferModal';
 import { TransferOwnership } from './modals/TransferOwnership';
 import { UnmigrateBudgetAutomationsModal } from './modals/UnmigrateBudgetAutomationsModal';
 import { CategoryLearning } from './payees/CategoryLearning';
+import { RsuGrantEditModal } from './rsu/RsuGrantEditModal';
 import { DiscoverSchedules } from './schedules/DiscoverSchedules';
 import { PostsOfflineNotification } from './schedules/PostsOfflineNotification';
 import { ScheduleEditModal } from './schedules/ScheduleEditModal';
@@ -267,6 +268,9 @@ export function Modals() {
 
         case 'schedule-edit':
           return <ScheduleEditModal key={key} {...modal.options} />;
+
+        case 'rsu-grant-edit':
+          return <RsuGrantEditModal key={key} {...modal.options} />;
 
         case 'schedule-link':
           return <ScheduleLink key={key} {...modal.options} />;

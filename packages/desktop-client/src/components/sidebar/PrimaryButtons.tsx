@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 
 import {
+  SvgChartBar,
   SvgCheveronDown,
   SvgCheveronRight,
   SvgCog,
@@ -35,6 +36,7 @@ export function PrimaryButtons() {
   const isActive = [
     '/payees',
     '/rules',
+    '/rsu',
     '/bank-sync',
     '/settings',
     '/tools',
@@ -70,6 +72,12 @@ export function PrimaryButtons() {
             title={t('Rules')}
             Icon={SvgTuning}
             to="/rules"
+            indent={15}
+          />
+          <SecondaryItem
+            title={t('RSU Grants')}
+            Icon={SvgChartBar}
+            to="/rsu"
             indent={15}
           />
           {isUsingServer && (

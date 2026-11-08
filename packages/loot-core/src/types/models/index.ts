@@ -17,6 +17,7 @@ export type * from './payee';
 export type * from './payee-location';
 export type * from './pluggyai';
 export type * from './reports';
+export type * from './rsu';
 export type * from './rule';
 export type * from './schedule';
 export type * from './simplefin';

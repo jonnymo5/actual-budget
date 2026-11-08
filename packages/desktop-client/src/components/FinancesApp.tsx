@@ -237,6 +237,20 @@ export function FinancesApp() {
                     />
 
                     <Route
+                      path="/rsu"
+                      element={
+                        <ErrorBoundary
+                          FallbackComponent={FeatureErrorFallback}
+                          resetKeys={[location.pathname]}
+                        >
+                          <NarrowNotSupported>
+                            <WideComponent name="Rsu" />
+                          </NarrowNotSupported>
+                        </ErrorBoundary>
+                      }
+                    />
+
+                    <Route
                       path="/payees"
                       element={
                         <ErrorBoundary

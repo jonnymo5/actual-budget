@@ -331,6 +331,10 @@ export type Modal =
       options: { id?: string; transaction?: TransactionEntity } | null;
     }
   | {
+      name: 'rsu-grant-edit';
+      options: { id?: string };
+    }
+  | {
       name: 'schedule-link';
       options: {
         transactionIds: string[];

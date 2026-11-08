@@ -85,6 +85,7 @@ export type MetadataPrefs = Partial<{
   lastSyncedTimestamp: string;
   resetClock: boolean;
   lastScheduleRun: string;
+  lastRsuPriceRefresh: string;
   userId: string; // TODO: delete this (unused)
 }>;
 
@@ -101,6 +102,7 @@ export type LocalPrefs = Partial<{
   'budget.startMonth': string;
   'tour.introSeen': boolean;
   'schedules.showCompleted': boolean;
+  'schedules.hideRsu': boolean;
   reportsViewLegend: boolean;
   reportsViewSummary: boolean;
   reportsViewLabel: boolean;

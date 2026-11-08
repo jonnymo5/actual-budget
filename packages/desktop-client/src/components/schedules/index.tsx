@@ -12,6 +12,8 @@ import type { ScheduleEntity } from '@actual-app/core/types/models';
 import { Search } from '#components/common/Search';
 import { FeatureErrorFallback } from '#components/FeatureErrorFallback';
 import { Page } from '#components/Page';
+import { useLocalPref } from '#hooks/useLocalPref';
+import { useQuery } from '#hooks/useQuery';
 import { useSchedules } from '#hooks/useSchedules';
 import { pushModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
@@ -24,15 +26,6 @@ export function Schedules() {
 
   const dispatch = useDispatch();
   const [filter, setFilter] = useState('');
-
-  const onEdit = useCallback(
-    (id: ScheduleEntity['id']) => {
-      dispatch(
-        pushModal({ modal: { name: 'schedule-edit', options: { id } } }),
-      );
-    },
-    [dispatch],
-  );
 
   const onAdd = useCallback(() => {
     dispatch(pushModal({ modal: { name: 'schedule-edit', options: {} } }));
@@ -86,6 +79,41 @@ export function Schedules() {
     statuses,
   } = useSchedules({ query: schedulesQuery });
 
+  const { data: rsuVestEvents } = useQuery<{ id: string; grant_id: string }>(
+    () => q('rsu_vest_events').select(['id', 'grant_id']),
+    [],
+  );
+  const [hideRsu, setHideRsu] = useLocalPref('schedules.hideRsu');
+  const hasRsuSchedules = schedules.some(schedule => schedule._rsu_vest_event);
+  const visibleSchedules = hideRsu
+    ? schedules.filter(schedule => !schedule._rsu_vest_event)
+    : schedules;
+
+  const onEdit = useCallback(
+    (id: ScheduleEntity['id']) => {
+      const schedule = schedules.find(s => s.id === id);
+      const vestEvent = schedule?._rsu_vest_event
+        ? rsuVestEvents?.find(event => event.id === schedule._rsu_vest_event)
+        : null;
+      if (vestEvent) {
+        // RSU-managed schedules are edited through their grant
+        dispatch(
+          pushModal({
+            modal: {
+              name: 'rsu-grant-edit',
+              options: { id: vestEvent.grant_id },
+            },
+          }),
+        );
+        return;
+      }
+      dispatch(
+        pushModal({ modal: { name: 'schedule-edit', options: { id } } }),
+      );
+    },
+    [dispatch, schedules, rsuVestEvents],
+  );
+
   return (
     <ErrorBoundary FallbackComponent={FeatureErrorFallback}>
       <Page header={t('Schedules')}>
@@ -103,6 +131,15 @@ export function Schedules() {
               justifyContent: 'flex-end',
             }}
           >
+            {hasRsuSchedules && (
+              <Button
+                variant="bare"
+                style={{ marginRight: 10 }}
+                onPress={() => setHideRsu(!hideRsu)}
+              >
+                {hideRsu ? t('Show RSU schedules') : t('Hide RSU schedules')}
+              </Button>
+            )}
             <Search
               placeholder={t('Filter schedules…')}
               value={filter}
@@ -113,7 +150,7 @@ export function Schedules() {
 
         <SchedulesTable
           isLoading={isSchedulesLoading}
-          schedules={schedules}
+          schedules={visibleSchedules}
           filter={filter}
           statuses={statuses}
           allowCompleted

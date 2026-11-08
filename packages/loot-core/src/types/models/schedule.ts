@@ -40,6 +40,8 @@ export type ScheduleEntity = {
   _conditions: RuleConditionEntity[];
   _actions: RuleActionEntity[];
   _has_splits?: boolean;
+  /** Set when an RSU vest event owns this schedule. */
+  _rsu_vest_event?: string | null;
 };
 
 export type DiscoverScheduleEntity = {
