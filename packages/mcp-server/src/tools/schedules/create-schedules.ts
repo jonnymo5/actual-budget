@@ -90,6 +90,13 @@ const scheduleInput = z.object({
     .describe(
       'True: Actual enters the transaction by itself on the date. False (the default): it only reminds, and forecasts the amount, until the transaction arrives from the bank.',
     ),
+  category: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Category (name or id) for the transaction the schedule links to. An income category also lets sync_income_budget budget the deposit in its month.',
+    ),
 });
 
 const resultSchema = z.object({
@@ -101,6 +108,7 @@ const resultSchema = z.object({
   name: z.string(),
   account: z.string().nullable(),
   payee: z.string().nullable(),
+  category: z.string().nullable(),
   amount: z.number().describe('Major units; the lower end of a range.'),
   amount_upper: z.number().nullable(),
   amount_match: z.enum(['exact', 'approximate', 'between']),
@@ -128,7 +136,7 @@ type ScheduleResult = z.output<typeof resultSchema>;
 export const createSchedules = defineTool({
   name: 'create_schedules',
   title: 'Create schedules',
-  description: `Creates schedules: expected recurring or one-off payments and deposits such as a mortgage, a paycheck, a card payment or a subscription. Schedules are what get_schedules lists and what cash_flow_projection uses to place each payment on its date, so the more of the budget's regular flows are scheduled, the more exact its projections are. Give each as a name (unique), an account, a payee, a signed amount and a start_date (YYYY-MM-DD), plus how it repeats: frequency once, daily, weekly, monthly or yearly, an interval, days_of_month for a monthly one (several days, e.g. a paycheck on the 1st and the 15th, make a single schedule; -1 is the last day), a weekend rule (move to the next or previous weekday), and an optional end (after N occurrences, or on a date). Amounts are in major currency units (e.g. dollars, not cents): negative for a payment, positive for a deposit; use amount_match "approximate" or "between" for a bill that varies. For a payment to one of the budget's own accounts (paying a credit card) give that account's name as the payee. posts_transaction (default false) makes Actual enter the transaction by itself on the date; leave it false when the bank import brings the transaction in. The preview lists each schedule with its recurrence in words and its next ${UPCOMING_SHOWN} dates so the dates can be checked before anything is created; an entry that cannot be created is skipped with the reason and the others still go ahead. At most ${MAX_SCHEDULES} per call. This only adds schedules; it does not change or delete existing ones.`,
+  description: `Creates schedules: expected recurring or one-off payments and deposits such as a mortgage, a paycheck, a card payment or a subscription. Schedules are what get_schedules lists and what cash_flow_projection uses to place each payment on its date, so the more of the budget's regular flows are scheduled, the more exact its projections are. Give each as a name (unique), an account, a payee, a signed amount and a start_date (YYYY-MM-DD), plus how it repeats: frequency once, daily, weekly, monthly or yearly, an interval, days_of_month for a monthly one (several days, e.g. a paycheck on the 1st and the 15th, make a single schedule; -1 is the last day), a weekend rule (move to the next or previous weekday), and an optional end (after N occurrences, or on a date). Amounts are in major currency units (e.g. dollars, not cents): negative for a payment, positive for a deposit; use amount_match "approximate" or "between" for a bill that varies. For a payment to one of the budget's own accounts (paying a credit card) give that account's name as the payee. An optional category is set on the transaction the schedule links to; give an income category for a deposit such as a paycheck or bonus so sync_income_budget can budget it. posts_transaction (default false) makes Actual enter the transaction by itself on the date; leave it false when the bank import brings the transaction in. The preview lists each schedule with its recurrence in words and its next ${UPCOMING_SHOWN} dates so the dates can be checked before anything is created; an entry that cannot be created is skipped with the reason and the others still go ahead. At most ${MAX_SCHEDULES} per call. This only adds schedules; it does not change or delete existing ones.`,
   kind: 'write',
   input: {
     schedules: z
@@ -183,6 +191,7 @@ export const createSchedules = defineTool({
           status: 'skipped',
           account: null,
           payee: null,
+          category: null,
           recurrence: null,
           upcoming_dates: [],
           skipped_reason: plan.reason,
@@ -215,6 +224,7 @@ export const createSchedules = defineTool({
         status: 'ready',
         account: draft.account.name,
         payee: draft.payee.name,
+        category: draft.category?.name ?? null,
         recurrence: describeRecurrence(draft.date).description,
         upcoming_dates: upcomingDates(draft.date, {
           // Look ahead from today, or from the start date if that is later.
@@ -231,7 +241,7 @@ export const createSchedules = defineTool({
     if (!ctx.dryRun) {
       for (const [index, draft] of drafts) {
         try {
-          results[index].schedule_id = await ctx.api.createSchedule({
+          const scheduleId = await ctx.api.createSchedule({
             name: draft.name,
             posts_transaction: draft.postsTransaction,
             account: draft.account.id,
@@ -240,7 +250,14 @@ export const createSchedules = defineTool({
             amountOp: draft.amountOp,
             date: draft.date,
           });
+          results[index].schedule_id = scheduleId;
           results[index].created = true;
+          if (draft.category) {
+            await ctx.lootCore.send('schedule/set-category', {
+              id: scheduleId,
+              category: draft.category.id,
+            });
+          }
         } catch (error) {
           results[index].status = 'skipped';
           results[index].skipped_reason =
@@ -278,7 +295,7 @@ export const createSchedules = defineTool({
           ? `between ${format(result.amount)} and ${format(result.amount_upper)}`
           : `${result.amount_match === 'approximate' ? '~' : ''}${format(result.amount)}`;
       return [
-        `[${tag}] ${result.name} | ${amount} | ${result.payee} | ${result.account} | ${result.recurrence}${result.posts_transaction ? ' | posts the transaction itself' : ''}`,
+        `[${tag}] ${result.name} | ${amount} | ${result.payee} | ${result.account}${result.category ? ` | ${result.category}` : ''} | ${result.recurrence}${result.posts_transaction ? ' | posts the transaction itself' : ''}`,
         `    next: ${result.upcoming_dates.join(', ')}${result.schedule_id ? `  [id: ${result.schedule_id}]` : ''}`,
       ].join('\n');
     };

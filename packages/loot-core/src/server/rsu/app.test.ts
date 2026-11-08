@@ -5,13 +5,18 @@ import * as db from '#server/db';
 import { loadMappings } from '#server/db/mappings';
 import { runMutator } from '#server/mutators';
 import * as prefs from '#server/prefs';
-import { app as schedulesApp } from '#server/schedules/app';
+import {
+  createSchedule,
+  app as schedulesApp,
+  setScheduleCategory,
+  updateSchedule,
+} from '#server/schedules/app';
 import { setServer } from '#server/server-config';
 import { handlers } from '#server/tests/mockSyncServer';
 import { loadRules } from '#server/transactions/transaction-rules';
 import * as monthUtils from '#shared/months';
 import { q } from '#shared/query';
-import type { RuleEntity, ScheduleEntity } from '#types/models';
+import type { RecurConfig, RuleEntity, ScheduleEntity } from '#types/models';
 
 import {
   app,
@@ -663,6 +668,105 @@ describe('syncBudget', () => {
     expect(result.ignoredGrants).toEqual([grantId]);
     expect(result.changes).toEqual([]);
     expect(getBudget({ category: expenseId, month: '2025-04' })).toBe(0);
+  });
+
+  async function incomeSchedule(
+    category: string | null,
+    amount: number,
+    date: string | RecurConfig,
+  ): Promise<string> {
+    const id = await createSchedule({
+      conditions: [
+        { op: 'is', field: 'account', value: accountId },
+        { op: 'isapprox', field: 'amount', value: amount },
+        { op: 'isapprox', field: 'date', value: date },
+      ],
+    });
+    if (category) {
+      await setScheduleCategory({ id, category });
+    }
+    return id;
+  }
+
+  it('budgets deposits from schedules tagged with an income category', async () => {
+    await useTrackingBudget();
+    const groupId = await db.insertCategoryGroup({
+      name: 'More income',
+      is_income: 1,
+    });
+    const bonusId = await db.insertCategory({
+      name: 'Bonus',
+      cat_group: groupId,
+      is_income: 1,
+    });
+    const payrollId = await db.insertCategory({
+      name: 'Payroll',
+      cat_group: groupId,
+      is_income: 1,
+    });
+    await incomeSchedule(bonusId, 300000, {
+      start: '2025-04-15',
+      frequency: 'yearly',
+    });
+    await incomeSchedule(payrollId, 50000, {
+      start: '2025-01-13',
+      frequency: 'monthly',
+      patterns: [
+        { type: 'day', value: 13 },
+        { type: 'day', value: 28 },
+      ],
+    });
+    // Neither of these is budgeted: one has no category, one is not income.
+    await incomeSchedule(null, 70000, '2025-03-01');
+    const spendingGroup = await db.insertCategoryGroup({ name: 'Spending' });
+    const rentId = await db.insertCategory({
+      name: 'Rent',
+      cat_group: spendingGroup,
+    });
+    await incomeSchedule(rentId, -90000, {
+      start: '2025-01-01',
+      frequency: 'monthly',
+    });
+    await setBudget({ category: bonusId, month: '2025-02', amount: 4200 });
+
+    const result = await syncBudget();
+
+    const budgeted = (category: string, month: string) =>
+      getBudget({ category, month });
+    expect(budgeted(bonusId, '2025-04')).toBe(300000);
+    expect(budgeted(bonusId, '2025-02')).toBe(0);
+    // The yearly bonus comes round again in April 2026, past the range.
+    expect(budgeted(bonusId, '2026-01')).toBe(0);
+    for (const month of ['2025-01', '2025-06', '2026-01']) {
+      expect(budgeted(payrollId, month)).toBe(100000);
+    }
+    expect(budgeted(rentId, '2025-03')).toBe(0);
+    expect(budgeted(categoryId, '2025-03')).toBe(0);
+    expect(result.changes.map(change => change.category)).not.toContain(rentId);
+  });
+
+  it('adds scheduled deposits to RSU vests in the same category', async () => {
+    await useTrackingBudget();
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+    await incomeSchedule(categoryId, 12300, '2025-04-30');
+
+    await syncBudget();
+    // The grant's own vest schedule is not counted a second time.
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(
+      50000 + 12300,
+    );
+  });
+
+  it('keeps a completed deposit from earlier this month', async () => {
+    await useTrackingBudget();
+    const arrived = await incomeSchedule(categoryId, 20000, '2025-01-05');
+    const cancelled = await incomeSchedule(categoryId, 30000, '2025-01-20');
+    await updateSchedule({ schedule: { id: arrived, completed: true } });
+    await updateSchedule({ schedule: { id: cancelled, completed: true } });
+
+    await syncBudget();
+    expect(getBudget({ category: categoryId, month: '2025-01' })).toBe(20000);
   });
 
   it('does nothing in an envelope budget', async () => {

@@ -106,12 +106,12 @@ async function budgeted(month: string): Promise<number | null> {
   return found?.budgeted ?? null;
 }
 
-describe('sync_rsu_budget', () => {
+describe('sync_income_budget', () => {
   it('previews the summed vests per month and changes nothing', async () => {
     await useTrackingBudget();
     const { data, text } = await succeed(
       connection,
-      'sync_rsu_budget',
+      'sync_income_budget',
       {},
       syncSchema,
     );
@@ -133,7 +133,7 @@ describe('sync_rsu_budget', () => {
     await useTrackingBudget();
     const applied = await succeed(
       connection,
-      'sync_rsu_budget',
+      'sync_income_budget',
       { auto: true, dry_run: false },
       syncSchema,
     );
@@ -147,7 +147,7 @@ describe('sync_rsu_budget', () => {
 
     const again = await succeed(
       connection,
-      'sync_rsu_budget',
+      'sync_income_budget',
       { dry_run: false },
       syncSchema,
     );
@@ -156,10 +156,136 @@ describe('sync_rsu_budget', () => {
     expect(again.text).toMatch(/already up to date/);
   });
 
+  it('adds deposits from schedules tagged with an income category', async () => {
+    await useTrackingBudget();
+    const created = await succeed(
+      connection,
+      'create_schedules',
+      {
+        schedules: [
+          {
+            name: 'Bonus',
+            account: 'Brokerage cash',
+            payee: 'Example Broker',
+            amount: 1000,
+            amount_match: 'approximate',
+            start_date: `${AFTER}-15`,
+            frequency: 'once',
+            category: incomeCategory,
+          },
+        ],
+        dry_run: false,
+      },
+      z.object({
+        schedules: z.array(z.object({ category: z.string().nullable() })),
+      }),
+    );
+    expect(created.data.schedules[0].category).toBe(incomeCategory);
+
+    const { data } = await succeed(
+      connection,
+      'sync_income_budget',
+      {},
+      syncSchema,
+    );
+    expect(data.changes).toContainEqual({
+      category: incomeCategory,
+      month: AFTER,
+      before: 0,
+      after: 100 + 1000,
+    });
+  });
+
+  it('tags and clears schedules, but not the ones RSU grants own', async () => {
+    await useTrackingBudget();
+    await succeed(
+      connection,
+      'create_schedules',
+      {
+        schedules: [
+          {
+            name: 'Side gig',
+            account: 'Brokerage cash',
+            payee: 'Example Broker',
+            amount: 500,
+            start_date: `${NEXT}-20`,
+            frequency: 'once',
+          },
+        ],
+        dry_run: false,
+      },
+      z.object({}),
+    );
+    const changeSchema = z.object({
+      changes: z.array(
+        z.object({
+          schedule: z.string(),
+          before: z.string().nullable(),
+          after: z.string().nullable(),
+        }),
+      ),
+      unchanged: z.array(z.string()),
+      skipped: z.array(z.object({ schedule: z.string(), reason: z.string() })),
+    });
+
+    const tagged = await succeed(
+      connection,
+      'set_schedule_category',
+      {
+        entries: [
+          { schedule: 'Side gig', category: incomeCategory },
+          { schedule: `RSU · Grant A · ${NEXT}-08`, category: null },
+          { schedule: 'No such schedule', category: null },
+        ],
+        dry_run: false,
+      },
+      changeSchema,
+    );
+    expect(tagged.data.changes).toEqual([
+      { schedule: 'Side gig', before: null, after: incomeCategory },
+    ]);
+    expect(tagged.data.skipped.map(skip => skip.reason)).toEqual([
+      expect.stringMatching(/RSU vest/),
+      expect.stringMatching(/no schedule is named/),
+    ]);
+
+    const withGig = await succeed(
+      connection,
+      'sync_income_budget',
+      {},
+      syncSchema,
+    );
+    expect(withGig.data.changes).toContainEqual({
+      category: incomeCategory,
+      month: NEXT,
+      before: 0,
+      after: 700 + 500,
+    });
+
+    await succeed(
+      connection,
+      'set_schedule_category',
+      { entries: [{ schedule: 'Side gig', category: null }], dry_run: false },
+      changeSchema,
+    );
+    const cleared = await succeed(
+      connection,
+      'sync_income_budget',
+      {},
+      syncSchema,
+    );
+    expect(cleared.data.changes).toContainEqual({
+      category: incomeCategory,
+      month: NEXT,
+      before: 0,
+      after: 700,
+    });
+  });
+
   it('changes nothing in an envelope budget', async () => {
     const { data, text } = await succeed(
       connection,
-      'sync_rsu_budget',
+      'sync_income_budget',
       { dry_run: false },
       syncSchema,
     );

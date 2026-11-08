@@ -5,6 +5,7 @@ import { monthComparison } from './analysis/month-comparison';
 import { spendingSummary } from './analysis/spending-summary';
 import { spendingTrends } from './analysis/spending-trends';
 import { setBudgetAmounts } from './budget/set-budget-amounts';
+import { syncIncomeBudget } from './budget/sync-income-budget';
 import { categorizeTransactions } from './categorize/categorize-transactions';
 import { getUncategorized } from './categorize/get-uncategorized';
 import { updateTransaction } from './categorize/update-transaction';
@@ -29,7 +30,6 @@ import { lockRsuVestPrices } from './rsu/lock-rsu-vest-prices';
 import { matchRsuDeposits } from './rsu/match-rsu-deposits';
 import { refreshStockPrices } from './rsu/refresh-stock-prices';
 import { setStockPrice } from './rsu/set-stock-price';
-import { syncRsuBudget } from './rsu/sync-rsu-budget';
 import { updateRsuGrant } from './rsu/update-rsu-grant';
 import { applyRulesRetroactively } from './rules/apply-rules-retroactively';
 import { createRule } from './rules/create-rule';
@@ -37,6 +37,7 @@ import { deleteRule } from './rules/delete-rule';
 import { previewRule } from './rules/preview-rule';
 import { updateRule } from './rules/update-rule';
 import { createSchedules } from './schedules/create-schedules';
+import { setScheduleCategory } from './schedules/set-schedule-category';
 import { findTransferCandidates } from './transfers/find-transfer-candidates';
 import { linkTransfers } from './transfers/link-transfers';
 import { moveTransfers } from './transfers/move-transfers';
@@ -68,6 +69,7 @@ export const allTools: ToolDefinition[] = [
   moveTransfers,
   setBudgetAmounts,
   createSchedules,
+  setScheduleCategory,
   refreshStockPrices,
   createRsuGrant,
   updateRsuGrant,
@@ -75,7 +77,7 @@ export const allTools: ToolDefinition[] = [
   setStockPrice,
   matchRsuDeposits,
   lockRsuVestPrices,
-  syncRsuBudget,
+  syncIncomeBudget,
   previewRule,
   createRule,
   updateRule,
