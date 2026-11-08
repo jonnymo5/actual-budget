@@ -44,6 +44,20 @@ export function StockPriceStrip({
     setIsRefreshing(true);
     try {
       const result = await send('rsu/refresh-prices', { force });
+      const lock = result.error ? null : await send('rsu/lock-vest-prices', {});
+      if (lock && lock.locked.length > 0) {
+        dispatch(
+          addNotification({
+            notification: {
+              type: 'message',
+              message: t(
+                'Locked the vest-date price for {{count}} past vests.',
+                { count: lock.locked.length },
+              ),
+            },
+          }),
+        );
+      }
       if (result.error === 'no-server') {
         dispatch(
           addNotification({

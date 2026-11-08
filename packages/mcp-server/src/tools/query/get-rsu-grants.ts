@@ -1,4 +1,8 @@
-import { estimateVestNet, normalizeTicker } from '@actual-app/core/shared/rsu';
+import {
+  normalizeTicker,
+  summarizeGrantPayout,
+  vestEventValue,
+} from '@actual-app/core/shared/rsu';
 import { z } from 'zod';
 
 import { defineTool } from '#tools/registry';
@@ -7,15 +11,29 @@ const vestEventSchema = z.object({
   id: z.string(),
   vest_date: z.string().describe('YYYY-MM-DD.'),
   shares: z.number(),
+  vest_price: z
+    .number()
+    .nullable()
+    .describe(
+      'Share price locked on the vest date, major units; set once a row has vested.',
+    ),
   est_gross: z
     .number()
     .nullable()
-    .describe('Shares × current price, major units; null without a price.'),
+    .describe(
+      'Shares × price, major units: the vest-date price once locked, else the current quote; null without either.',
+    ),
   est_net: z
     .number()
     .nullable()
     .describe(
-      'Estimated cash after withholding, major units; null without a price.',
+      'Cash after withholding, major units; the recorded actual net when there is one.',
+    ),
+  basis: z
+    .enum(['actual', 'locked', 'current'])
+    .nullable()
+    .describe(
+      'Where est_net comes from: a recorded deposit, the locked vest-date price, or the current quote.',
     ),
   actual_net: z
     .number()
@@ -31,7 +49,7 @@ export const getRsuGrants = defineTool({
   name: 'get_rsu_grants',
   title: 'List RSU grants',
   description:
-    'List RSU (restricted stock unit) grants with their vest rows and the share prices behind the estimates. Each vest row gives its date (YYYY-MM-DD), share count, and the estimated gross and net cash in major currency units (shares × price, net after the grant\'s tax withholding; shares are assumed sold at vest). Future vest rows also exist as one-off schedules named "RSU · <grant> · <date>", which is how they reach cash_flow_projection and the Balance Forecast.',
+    'List RSU (restricted stock unit) grants with their vest rows and the share prices behind the estimates. Each vest row gives its date (YYYY-MM-DD), share count, and the gross and net cash in major currency units (shares × price, net after the grant\'s tax withholding; shares are assumed sold at vest). Rows that have vested use the share price locked on the vest date, or the deposit the user recorded, so a grant\'s paid-out total does not move with the market. Future vest rows also exist as one-off schedules named "RSU · <grant> · <date>", which is how they reach cash_flow_projection and the Balance Forecast.',
   kind: 'read',
   input: {},
   output: {
@@ -48,12 +66,19 @@ export const getRsuGrants = defineTool({
         withholding_rate: z
           .number()
           .describe('Fraction withheld for tax, 0..1 (0.37 = 37%).'),
-        unvested_est_net: z
+        paid_out_net: z
           .number()
-          .nullable()
           .describe(
-            'Sum of est_net over vest rows on or after today, major units.',
+            'Net of rows that have vested (recorded deposits, else vest-date price estimates), major units.',
           ),
+        remaining_est_net: z
+          .number()
+          .describe(
+            'Estimated net of rows still to vest at the current quote, major units.',
+          ),
+        unvalued_rows: z
+          .number()
+          .describe('Rows with neither a recorded net nor any price.'),
         vest_events: z.array(vestEventSchema),
       }),
     ),
@@ -80,34 +105,26 @@ export const getRsuGrants = defineTool({
 
     const grantRows = grants.map(grant => {
       const price = priceByTicker.get(normalizeTicker(grant.ticker)) ?? null;
-      const rows = events
+      const grantEvents = events
         .filter(event => event.grant_id === grant.id)
-        .sort((a, b) => a.vest_date.localeCompare(b.vest_date))
-        .map(event => {
-          const estimate = price
-            ? estimateVestNet({
-                shares: event.shares,
-                priceCents: price.price,
-                withholdingRate: grant.withholding_rate,
-              })
-            : null;
-          return {
-            id: event.id,
-            vest_date: event.vest_date,
-            shares: event.shares,
-            est_gross: estimate ? toMajor(estimate.gross) : null,
-            est_net: estimate ? toMajor(estimate.net) : null,
-            actual_net:
-              event.actual_net == null ? null : toMajor(event.actual_net),
-            schedule_id: event.schedule,
-          };
-        });
-      const unvested = rows.filter(row => row.vest_date >= today);
-      const unvestedNet = unvested.some(row => row.est_net == null)
-        ? unvested.every(row => row.est_net == null)
-          ? null
-          : unvested.reduce((sum, row) => sum + (row.est_net ?? 0), 0)
-        : unvested.reduce((sum, row) => sum + (row.est_net ?? 0), 0);
+        .sort((a, b) => a.vest_date.localeCompare(b.vest_date));
+      const rows = grantEvents.map(event => {
+        const value = vestEventValue(event, grant, price);
+        return {
+          id: event.id,
+          vest_date: event.vest_date,
+          shares: event.shares,
+          vest_price:
+            event.actual_price == null ? null : toMajor(event.actual_price),
+          est_gross: value ? toMajor(value.gross) : null,
+          est_net: value ? toMajor(value.net) : null,
+          basis: value?.basis ?? null,
+          actual_net:
+            event.actual_net == null ? null : toMajor(event.actual_net),
+          schedule_id: event.schedule,
+        };
+      });
+      const payout = summarizeGrantPayout(grant, grantEvents, price, today);
       return {
         id: grant.id,
         name: grant.name,
@@ -118,7 +135,9 @@ export const getRsuGrants = defineTool({
         payee_id: grant.payee,
         category_id: grant.category,
         withholding_rate: grant.withholding_rate,
-        unvested_est_net: unvested.length === 0 ? 0 : unvestedNet,
+        paid_out_net: toMajor(payout.paidOut),
+        remaining_est_net: toMajor(payout.remaining),
+        unvalued_rows: payout.unvaluedCount,
         vest_events: rows,
       };
     });
@@ -135,10 +154,10 @@ export const getRsuGrants = defineTool({
     const lines: string[] = [];
     for (const grant of grantRows) {
       lines.push(
-        `${grant.name} (${grant.ticker}): ${grant.total_shares} shares, ${Math.round(grant.withholding_rate * 100)}% withheld` +
-          (grant.unvested_est_net == null
-            ? ', no price yet'
-            : `, ~${format(grant.unvested_est_net)} still to vest`) +
+        `${grant.name} (${grant.ticker}): ${grant.total_shares} shares, ${Math.round(grant.withholding_rate * 100)}% withheld, ${format(grant.paid_out_net)} paid out, ~${format(grant.remaining_est_net)} still to vest` +
+          (grant.unvalued_rows > 0
+            ? ` (${grant.unvalued_rows} rows without a price)`
+            : '') +
           ` [id: ${grant.id}]`,
       );
       for (const row of grant.vest_events) {

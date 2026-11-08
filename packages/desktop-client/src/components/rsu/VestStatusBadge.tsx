@@ -35,7 +35,7 @@ export function VestStatusBadge({ status }: VestStatusBadgeProps) {
     case 'past':
       return (
         <Pill
-          text={t('Past')}
+          text={t('Vested')}
           color={theme.buttonNormalDisabledText}
           backgroundColor={theme.tableRowHeaderBackground}
           Icon={SvgLockClosed}

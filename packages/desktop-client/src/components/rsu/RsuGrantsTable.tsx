@@ -11,7 +11,7 @@ import { format as formatMonthDate } from '@actual-app/core/shared/months';
 import {
   normalizeTicker,
   roundShares,
-  sumShares,
+  summarizeGrantPayout,
   vestEventNet,
 } from '@actual-app/core/shared/rsu';
 import type {
@@ -27,7 +27,7 @@ import { useContextMenu } from '#hooks/useContextMenu';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
 
-export type RsuGrantAction = 'sync' | 'delete';
+export type RsuGrantAction = 'sync' | 'match-deposits' | 'delete';
 
 type RsuGrantsTableProps = {
   isLoading: boolean;
@@ -67,14 +67,17 @@ export function RsuGrantsTable({
         <Field width={110}>
           <Trans>Granted</Trans>
         </Field>
-        <Field width={150}>
+        <Field width={130}>
           <Trans>Shares vested</Trans>
         </Field>
         <Field width={170}>
           <Trans>Next vest</Trans>
         </Field>
-        <Field width={140} style={{ textAlign: 'right' }}>
-          <Trans>Remaining est. net</Trans>
+        <Field width={120} style={{ textAlign: 'right' }}>
+          <Trans>Paid out</Trans>
+        </Field>
+        <Field width={120} style={{ textAlign: 'right' }}>
+          <Trans>Remaining</Trans>
         </Field>
         <Field width={40} />
       </TableHeader>
@@ -123,17 +126,10 @@ function GrantRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const vested = events.filter(event => event.vest_date < today);
   const upcoming = events.filter(event => event.vest_date >= today);
   const nextEvent = upcoming[0];
   const nextNet = nextEvent ? vestEventNet(nextEvent, grant, price) : null;
-  const remainingNet = upcoming.reduce<number | null>((total, event) => {
-    const net = vestEventNet(event, grant, price);
-    if (net == null) {
-      return total;
-    }
-    return (total ?? 0) + net;
-  }, null);
+  const payout = summarizeGrantPayout(grant, events, price, today);
 
   const openMenu = () => {
     buttonRef.current?.dispatchEvent(
@@ -149,6 +145,11 @@ function GrantRow({
         name: 'sync',
         text: t('Sync schedules'),
         onClick: () => onAction('sync', grant.id),
+      },
+      {
+        name: 'match-deposits',
+        text: t('Match deposits to past vests'),
+        onClick: () => onAction('match-deposits', grant.id),
       },
       {
         name: 'delete',
@@ -180,10 +181,10 @@ function GrantRow({
       <Field width={110} name="grant-date">
         {grant.grant_date ? formatMonthDate(grant.grant_date, dateFormat) : ''}
       </Field>
-      <Field width={150} name="shares">
+      <Field width={130} name="shares">
         <FinancialText>
           {t('{{vested}} of {{total}}', {
-            vested: roundShares(sumShares(vested)),
+            vested: payout.vestedShares,
             total: roundShares(grant.total_shares),
           })}
         </FinancialText>
@@ -206,16 +207,26 @@ function GrantRow({
           </Text>
         )}
       </Field>
-      <Field width={140} name="remaining" style={{ textAlign: 'right' }}>
-        {remainingNet != null ? (
+      <Field width={120} name="paid-out" style={{ textAlign: 'right' }}>
+        {payout.vestedShares > 0 && (
           <FinancialText>
-            <PrivacyFilter>{format(remainingNet, 'financial')}</PrivacyFilter>
+            <PrivacyFilter>{format(payout.paidOut, 'financial')}</PrivacyFilter>
           </FinancialText>
-        ) : upcoming.length > 0 ? (
-          <Text style={{ color: theme.warningTextDark }}>
-            <Trans>Needs price</Trans>
-          </Text>
-        ) : null}
+        )}
+      </Field>
+      <Field width={120} name="remaining" style={{ textAlign: 'right' }}>
+        {upcoming.length > 0 &&
+          (price || payout.remaining > 0 ? (
+            <FinancialText>
+              <PrivacyFilter>
+                {format(payout.remaining, 'financial')}
+              </PrivacyFilter>
+            </FinancialText>
+          ) : (
+            <Text style={{ color: theme.warningTextDark }}>
+              <Trans>Needs price</Trans>
+            </Text>
+          ))}
       </Field>
       <Field width={40} name="actions" style={{ alignItems: 'center' }}>
         <Button

@@ -129,26 +129,112 @@ export function estimateVestNet({
   return { gross, net };
 }
 
+export type VestValueBasis = 'actual' | 'locked' | 'current';
+
+export type VestValue = {
+  gross: number;
+  net: number;
+  /** actual: recorded net; locked: price on the vest date; current: latest quote */
+  basis: VestValueBasis;
+};
+
 /**
- * The net cash a vest event is worth: the recorded actual when there is one,
- * otherwise the estimate from the current price, or `null` without a price.
+ * What a vest event is worth, from the most to the least certain source: the
+ * net the user recorded, then the share price locked on the vest date, then
+ * the current quote. `null` when there is nothing to go on.
  */
-export function vestEventNet(
-  event: Pick<RsuVestEventEntity, 'shares' | 'actual_net'>,
+export function vestEventValue(
+  event: Pick<RsuVestEventEntity, 'shares' | 'actual_net' | 'actual_price'>,
   grant: Pick<RsuGrantEntity, 'withholding_rate'>,
   price: Pick<StockPriceEntity, 'price'> | null | undefined,
-): number | null {
+): VestValue | null {
   if (event.actual_net != null) {
-    return event.actual_net;
+    const gross =
+      event.actual_price != null
+        ? Math.round(event.shares * event.actual_price)
+        : event.actual_net;
+    return { gross, net: event.actual_net, basis: 'actual' };
+  }
+  if (event.actual_price != null) {
+    return {
+      ...estimateVestNet({
+        shares: event.shares,
+        priceCents: event.actual_price,
+        withholdingRate: grant.withholding_rate,
+      }),
+      basis: 'locked',
+    };
   }
   if (price == null) {
     return null;
   }
-  return estimateVestNet({
-    shares: event.shares,
-    priceCents: price.price,
-    withholdingRate: grant.withholding_rate,
-  }).net;
+  return {
+    ...estimateVestNet({
+      shares: event.shares,
+      priceCents: price.price,
+      withholdingRate: grant.withholding_rate,
+    }),
+    basis: 'current',
+  };
+}
+
+/** The net cash a vest event is worth; see `vestEventValue`. */
+export function vestEventNet(
+  event: Pick<RsuVestEventEntity, 'shares' | 'actual_net' | 'actual_price'>,
+  grant: Pick<RsuGrantEntity, 'withholding_rate'>,
+  price: Pick<StockPriceEntity, 'price'> | null | undefined,
+): number | null {
+  return vestEventValue(event, grant, price)?.net ?? null;
+}
+
+export type GrantPayout = {
+  /** Net of rows that have vested (before today), cents */
+  paidOut: number;
+  /** Net of rows still to vest at the current price, cents */
+  remaining: number;
+  /** Rows that could not be valued at all */
+  unvaluedCount: number;
+  vestedShares: number;
+  unvestedShares: number;
+};
+
+export function summarizeGrantPayout(
+  grant: Pick<RsuGrantEntity, 'withholding_rate'>,
+  events: ReadonlyArray<
+    Pick<
+      RsuVestEventEntity,
+      'shares' | 'actual_net' | 'actual_price' | 'vest_date'
+    >
+  >,
+  price: Pick<StockPriceEntity, 'price'> | null | undefined,
+  today: string,
+): GrantPayout {
+  const summary: GrantPayout = {
+    paidOut: 0,
+    remaining: 0,
+    unvaluedCount: 0,
+    vestedShares: 0,
+    unvestedShares: 0,
+  };
+  for (const event of events) {
+    const vested = event.vest_date < today;
+    const value = vestEventValue(event, grant, price);
+    if (vested) {
+      summary.vestedShares += event.shares;
+    } else {
+      summary.unvestedShares += event.shares;
+    }
+    if (value == null) {
+      summary.unvaluedCount += 1;
+    } else if (vested) {
+      summary.paidOut += value.net;
+    } else {
+      summary.remaining += value.net;
+    }
+  }
+  summary.vestedShares = roundShares(summary.vestedShares);
+  summary.unvestedShares = roundShares(summary.unvestedShares);
+  return summary;
 }
 
 export type RsuProjectionRow = {

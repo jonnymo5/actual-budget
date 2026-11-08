@@ -11,8 +11,10 @@ import {
   generateVestEvents,
   projectRsuIncomeByMonth,
   rsuScheduleName,
+  summarizeGrantPayout,
   sumShares,
   vestEventNet,
+  vestEventValue,
 } from './rsu';
 
 describe('generateVestEvents', () => {
@@ -224,5 +226,97 @@ describe('rsuScheduleName', () => {
     expect(rsuScheduleName('Grant one', '2025-01-15', 1)).toBe(
       'RSU · Grant one · 2025-01-15 (2)',
     );
+  });
+});
+
+describe('vestEventValue', () => {
+  const grant = { withholding_rate: 0.4 };
+  const current = { price: 20000 };
+
+  it('prefers the recorded net, then the locked price, then the quote', () => {
+    expect(
+      vestEventValue(
+        { shares: 10, actual_net: 55000, actual_price: 10000 },
+        grant,
+        current,
+      ),
+    ).toEqual({ gross: 100000, net: 55000, basis: 'actual' });
+    expect(
+      vestEventValue(
+        { shares: 10, actual_net: null, actual_price: 10000 },
+        grant,
+        current,
+      ),
+    ).toEqual({ gross: 100000, net: 60000, basis: 'locked' });
+    expect(
+      vestEventValue(
+        { shares: 10, actual_net: null, actual_price: null },
+        grant,
+        current,
+      ),
+    ).toEqual({ gross: 200000, net: 120000, basis: 'current' });
+    expect(
+      vestEventValue(
+        { shares: 10, actual_net: null, actual_price: null },
+        grant,
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it('summarises what a grant has paid and still owes', () => {
+    const summary = summarizeGrantPayout(
+      grant,
+      [
+        {
+          vest_date: '2024-01-15',
+          shares: 10,
+          actual_net: 55000,
+          actual_price: 10000,
+        },
+        {
+          vest_date: '2024-04-15',
+          shares: 10,
+          actual_net: null,
+          actual_price: 12000,
+        },
+        {
+          vest_date: '2024-07-15',
+          shares: 10,
+          actual_net: null,
+          actual_price: null,
+        },
+        {
+          vest_date: '2026-01-15',
+          shares: 10,
+          actual_net: null,
+          actual_price: null,
+        },
+      ],
+      null,
+      '2025-01-01',
+    );
+    expect(summary).toEqual({
+      paidOut: 55000 + 72000,
+      remaining: 0,
+      unvaluedCount: 2,
+      vestedShares: 30,
+      unvestedShares: 10,
+    });
+    expect(
+      summarizeGrantPayout(
+        grant,
+        [
+          {
+            vest_date: '2026-01-15',
+            shares: 10,
+            actual_net: null,
+            actual_price: null,
+          },
+        ],
+        current,
+        '2025-01-01',
+      ).remaining,
+    ).toBe(120000);
   });
 });

@@ -18,7 +18,7 @@ import {
 import { getServer } from '#server/server-config';
 import { updateRule } from '#server/transactions/transaction-rules';
 import { undoable } from '#server/undo';
-import { currentDay } from '#shared/months';
+import { addDays, currentDay, subDays } from '#shared/months';
 import { q } from '#shared/query';
 import {
   clampWithholdingRate,
@@ -100,8 +100,29 @@ type StockQuoteResponse = {
   errors: Array<{ symbol: string; reason: string }>;
 };
 
+export type RsuLockResult = {
+  /** Vest event ids whose price was locked */
+  locked: string[];
+  failed: Array<{ eventId: string; reason: string }>;
+  error?: RsuRefreshError;
+};
+
+export type RsuMatchResult = {
+  matched: Array<{ eventId: string; transactionId: string; amount: number }>;
+  unmatched: string[];
+};
+
+type StockHistoryResponse = {
+  symbol: string;
+  currency: string | null;
+  closes: Array<{ date: string; close: number; close_date: string }>;
+  errors: Array<{ date: string; reason: string }>;
+};
+
 export type RsuHandlers = {
   'rsu/get': typeof getRsuData;
+  'rsu/lock-vest-prices': typeof lockVestPrices;
+  'rsu/match-deposits': typeof matchDeposits;
   'rsu-grant/create': typeof createGrant;
   'rsu-grant/update': typeof updateGrant;
   'rsu-grant/delete': typeof deleteGrant;
@@ -123,6 +144,8 @@ app.method('rsu-vest-event/update', mutator(undoable(updateVestEvent)));
 app.method('rsu-vest-event/delete', mutator(undoable(deleteVestEvent)));
 app.method('rsu/set-price', mutator(undoable(setPrice)));
 app.method('rsu/refresh-prices', mutator(refreshPrices));
+app.method('rsu/lock-vest-prices', mutator(lockVestPrices));
+app.method('rsu/match-deposits', mutator(undoable(matchDeposits)));
 app.method('rsu/sync-schedules', mutator(undoable(syncSchedules)));
 
 // Reads
@@ -587,6 +610,202 @@ export async function refreshPrices({
   return { updated, failed, skipped };
 }
 
+// Vest-date prices
+
+async function fetchServerJson<T>(
+  path: string,
+  body: unknown,
+): Promise<{ data: T } | { error: RsuRefreshError }> {
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    return { error: 'no-server' };
+  }
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+  try {
+    const data = (await post(
+      serverConfig.BASE_SERVER + path,
+      body,
+      { 'X-ACTUAL-TOKEN': userToken },
+      20_000,
+    )) as T;
+    return { data };
+  } catch (error) {
+    logger.warn(`Request to ${path} failed`, error);
+    return { error: error instanceof PostError ? error.reason : 'unknown' };
+  }
+}
+
+/**
+ * Freeze the share price of every vest that has already happened, using the
+ * close on its vest date, so past rows stop moving with the current quote.
+ * Rows that already have a price are left alone.
+ */
+export async function lockVestPrices({
+  grantId,
+}: { grantId?: string } = {}): Promise<RsuLockResult> {
+  const result: RsuLockResult = { locked: [], failed: [] };
+  const today = currentDay();
+  const grants = grantId
+    ? [await getGrant(grantId)].filter((g): g is RsuGrantEntity => g != null)
+    : await getGrants();
+  const events = await getEvents(grantId);
+
+  const byTicker = new Map<string, RsuVestEventEntity[]>();
+  for (const event of events) {
+    if (event.actual_price != null || event.vest_date > today) {
+      continue;
+    }
+    const grant = grants.find(g => g.id === event.grant_id);
+    if (!grant) {
+      continue;
+    }
+    const ticker = normalizeTicker(grant.ticker);
+    if (!isValidTicker(ticker)) {
+      result.failed.push({ eventId: event.id, reason: 'invalid-ticker' });
+      continue;
+    }
+    byTicker.set(ticker, [...(byTicker.get(ticker) ?? []), event]);
+  }
+  if (byTicker.size === 0) {
+    return result;
+  }
+
+  for (const [ticker, tickerEvents] of byTicker) {
+    const dates = [...new Set(tickerEvents.map(event => event.vest_date))];
+    const response = await fetchServerJson<StockHistoryResponse>(
+      '/stock-quote/history',
+      { symbol: ticker, dates },
+    );
+    if ('error' in response) {
+      result.error = response.error;
+      for (const event of tickerEvents) {
+        result.failed.push({ eventId: event.id, reason: response.error });
+      }
+      continue;
+    }
+    const closeByDate = new Map(
+      response.data.closes.map(close => [close.date, close.close] as const),
+    );
+    const reasonByDate = new Map(
+      response.data.errors.map(error => [error.date, error.reason] as const),
+    );
+    for (const event of tickerEvents) {
+      const close = closeByDate.get(event.vest_date);
+      if (typeof close !== 'number') {
+        result.failed.push({
+          eventId: event.id,
+          reason: reasonByDate.get(event.vest_date) ?? 'not-found',
+        });
+        continue;
+      }
+      await db.updateWithSchema('rsu_vest_events', {
+        id: event.id,
+        actual_price: amountToInteger(close),
+      });
+      result.locked.push(event.id);
+    }
+  }
+
+  // A locked price changes the amount of any schedule still open for the row.
+  const touchedGrants = new Set(
+    events
+      .filter(event => result.locked.includes(event.id))
+      .map(event => event.grant_id),
+  );
+  for (const id of touchedGrants) {
+    await syncSchedulesForGrant(id);
+  }
+  return result;
+}
+
+/** How long after a vest its deposit is still accepted as a match. */
+const DEPOSIT_WINDOW_AFTER_DAYS = 10;
+const DEPOSIT_WINDOW_BEFORE_DAYS = 2;
+
+/**
+ * Pair past vest rows that have no recorded net with the deposit from the
+ * grant's payee that landed closest to the vest date, and record its amount.
+ */
+export async function matchDeposits({
+  grantId,
+}: {
+  grantId: string;
+}): Promise<RsuMatchResult> {
+  const result: RsuMatchResult = { matched: [], unmatched: [] };
+  const grant = await getGrant(grantId);
+  if (!grant) {
+    throw new Error('RSU grant not found');
+  }
+  const today = currentDay();
+  const events = (await getEvents(grantId)).filter(
+    event => event.actual_net == null && event.vest_date < today,
+  );
+  if (events.length === 0) {
+    return result;
+  }
+
+  const dates = events.map(event => event.vest_date).sort();
+  const { data } = await aqlQuery(
+    q('transactions')
+      .filter({
+        account: grant.account,
+        payee: grant.payee,
+        amount: { $gt: 0 },
+        date: {
+          $gte: subDays(dates[0], DEPOSIT_WINDOW_BEFORE_DAYS),
+          $lte: addDays(dates[dates.length - 1], DEPOSIT_WINDOW_AFTER_DAYS),
+        },
+      })
+      .select(['id', 'date', 'amount']),
+  );
+  const deposits = data as Array<{ id: string; date: string; amount: number }>;
+  const usedTransactions = new Set<string>();
+
+  for (const event of events) {
+    const earliest = subDays(event.vest_date, DEPOSIT_WINDOW_BEFORE_DAYS);
+    const latest = addDays(event.vest_date, DEPOSIT_WINDOW_AFTER_DAYS);
+    const candidates = deposits
+      .filter(
+        deposit =>
+          !usedTransactions.has(deposit.id) &&
+          deposit.date >= earliest &&
+          deposit.date <= latest,
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(dayDistance(a.date, event.vest_date)) -
+          Math.abs(dayDistance(b.date, event.vest_date)),
+      );
+    const deposit = candidates[0];
+    if (!deposit) {
+      result.unmatched.push(event.id);
+      continue;
+    }
+    usedTransactions.add(deposit.id);
+    await db.updateWithSchema('rsu_vest_events', {
+      id: event.id,
+      actual_net: deposit.amount,
+    });
+    result.matched.push({
+      eventId: event.id,
+      transactionId: deposit.id,
+      amount: deposit.amount,
+    });
+  }
+  return result;
+}
+
+function dayDistance(a: string, b: string): number {
+  return (
+    (new Date(`${a}T00:00:00Z`).getTime() -
+      new Date(`${b}T00:00:00Z`).getTime()) /
+    86_400_000
+  );
+}
+
 // Schedules
 
 function conditionsFor(
@@ -827,7 +1046,8 @@ app.events.on('sync', ({ type }) => {
         return;
       }
       const result = await refreshPrices({});
-      if (!result.error) {
+      const lock = await lockVestPrices({});
+      if (!result.error && !lock.error) {
         await prefs.savePrefs({ lastRsuPriceRefresh: currentDay() });
       }
     } catch (error) {

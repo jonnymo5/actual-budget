@@ -7,7 +7,7 @@ export const refreshStockPrices = defineTool({
   name: 'refresh_stock_prices',
   title: 'Refresh stock prices',
   description:
-    'Fetch the current share price for every ticker used by an RSU grant (or just the tickers given) through the sync server, and rewrite the estimated net of the matching vest schedules. Tickers whose price was set by hand are skipped unless force is true. Needs a sync server; without one the result says so and prices stay as they are.',
+    'Fetch the current share price for every ticker used by an RSU grant (or just the tickers given) through the sync server, and rewrite the estimated net of the matching vest schedules, and lock the vest-date closing price of any vest that has happened but has no price yet. Tickers whose price was set by hand are skipped unless force is true. Needs a sync server; without one the result says so and prices stay as they are.',
   kind: 'write',
   input: {
     tickers: z
@@ -27,6 +27,9 @@ export const refreshStockPrices = defineTool({
       .array(z.string())
       .describe('Left alone: manual price, invalid symbol, or no server.'),
     failed: z.array(z.object({ symbol: z.string(), reason: z.string() })),
+    locked_vests: z
+      .number()
+      .describe('Past vest rows whose vest-date price was just locked.'),
     error: z
       .string()
       .nullable()
@@ -53,6 +56,7 @@ export const refreshStockPrices = defineTool({
           updated: toFetch,
           skipped,
           failed: [],
+          locked_vests: 0,
           error: null,
         },
         text:
@@ -70,6 +74,9 @@ export const refreshStockPrices = defineTool({
       tickers: normalized,
       force,
     });
+    const lock = result.error
+      ? { locked: [], failed: [] }
+      : await ctx.lootCore.send('rsu/lock-vest-prices', {});
     const considered = [...result.updated, ...result.skipped].concat(
       result.failed.map(item => item.symbol),
     );
@@ -92,12 +99,18 @@ export const refreshStockPrices = defineTool({
     if (result.skipped.length > 0 && !result.error) {
       parts.push(`Skipped ${result.skipped.join(', ')}.`);
     }
+    if (lock.locked.length > 0) {
+      parts.push(
+        `Locked the vest-date price of ${lock.locked.length} past vests.`,
+      );
+    }
     return {
       data: {
         tickers: [...new Set(considered)],
         updated: result.updated,
         skipped: result.skipped,
         failed: result.failed,
+        locked_vests: lock.locked.length,
         error: result.error ?? null,
       },
       text: parts.length > 0 ? parts.join(' ') : 'Nothing to refresh.',
