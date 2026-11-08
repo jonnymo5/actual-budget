@@ -9,6 +9,7 @@ import type {
 import {
   estimateVestNet,
   generateVestEvents,
+  planDepositMatches,
   projectRsuIncomeByMonth,
   rsuScheduleName,
   summarizeGrantPayout,
@@ -318,5 +319,29 @@ describe('vestEventValue', () => {
         '2025-01-01',
       ).remaining,
     ).toBe(120000);
+  });
+});
+
+describe('planDepositMatches', () => {
+  it('gives each vest the closest unused deposit inside the window', () => {
+    const plan = planDepositMatches(
+      [
+        { id: 'nov', vest_date: '2024-11-15' },
+        { id: 'oct', vest_date: '2024-10-15' },
+        { id: 'dec', vest_date: '2024-12-15' },
+      ],
+      [
+        { id: 't-early', date: '2024-10-01', amount: 1000 },
+        { id: 't-oct', date: '2024-10-18', amount: 61000 },
+        { id: 't-nov', date: '2024-11-20', amount: 59000 },
+        { id: 't-neg', date: '2024-12-16', amount: -5 },
+      ],
+    );
+
+    expect(plan.matched.map(m => [m.eventId, m.transactionId])).toEqual([
+      ['oct', 't-oct'],
+      ['nov', 't-nov'],
+    ]);
+    expect(plan.unmatched).toEqual(['dec']);
   });
 });

@@ -23,7 +23,13 @@ import { getTransactions } from './query/get-transactions';
 import { listAccounts } from './query/list-accounts';
 import { runQuery } from './query/run-query';
 import type { ToolDefinition } from './registry';
+import { createRsuGrant } from './rsu/create-rsu-grant';
+import { deleteRsuGrant } from './rsu/delete-rsu-grant';
+import { lockRsuVestPrices } from './rsu/lock-rsu-vest-prices';
+import { matchRsuDeposits } from './rsu/match-rsu-deposits';
 import { refreshStockPrices } from './rsu/refresh-stock-prices';
+import { setStockPrice } from './rsu/set-stock-price';
+import { updateRsuGrant } from './rsu/update-rsu-grant';
 import { applyRulesRetroactively } from './rules/apply-rules-retroactively';
 import { createRule } from './rules/create-rule';
 import { deleteRule } from './rules/delete-rule';
@@ -62,6 +68,12 @@ export const allTools: ToolDefinition[] = [
   setBudgetAmounts,
   createSchedules,
   refreshStockPrices,
+  createRsuGrant,
+  updateRsuGrant,
+  deleteRsuGrant,
+  setStockPrice,
+  matchRsuDeposits,
+  lockRsuVestPrices,
   previewRule,
   createRule,
   updateRule,

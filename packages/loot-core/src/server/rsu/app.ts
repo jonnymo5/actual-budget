@@ -22,8 +22,11 @@ import { addDays, currentDay, subDays } from '#shared/months';
 import { q } from '#shared/query';
 import {
   clampWithholdingRate,
+  DEPOSIT_WINDOW_AFTER_DAYS,
+  DEPOSIT_WINDOW_BEFORE_DAYS,
   isValidTicker,
   normalizeTicker,
+  planDepositMatches,
   roundShares,
   rsuScheduleName,
   vestEventNet,
@@ -721,10 +724,6 @@ export async function lockVestPrices({
   return result;
 }
 
-/** How long after a vest its deposit is still accepted as a match. */
-const DEPOSIT_WINDOW_AFTER_DAYS = 10;
-const DEPOSIT_WINDOW_BEFORE_DAYS = 2;
-
 /**
  * Pair past vest rows that have no recorded net with the deposit from the
  * grant's payee that landed closest to the vest date, and record its amount.
@@ -761,49 +760,24 @@ export async function matchDeposits({
       })
       .select(['id', 'date', 'amount']),
   );
-  const deposits = data as Array<{ id: string; date: string; amount: number }>;
-  const usedTransactions = new Set<string>();
+  const plan = planDepositMatches(
+    events,
+    data as Array<{ id: string; date: string; amount: number }>,
+  );
 
-  for (const event of events) {
-    const earliest = subDays(event.vest_date, DEPOSIT_WINDOW_BEFORE_DAYS);
-    const latest = addDays(event.vest_date, DEPOSIT_WINDOW_AFTER_DAYS);
-    const candidates = deposits
-      .filter(
-        deposit =>
-          !usedTransactions.has(deposit.id) &&
-          deposit.date >= earliest &&
-          deposit.date <= latest,
-      )
-      .sort(
-        (a, b) =>
-          Math.abs(dayDistance(a.date, event.vest_date)) -
-          Math.abs(dayDistance(b.date, event.vest_date)),
-      );
-    const deposit = candidates[0];
-    if (!deposit) {
-      result.unmatched.push(event.id);
-      continue;
-    }
-    usedTransactions.add(deposit.id);
+  for (const match of plan.matched) {
     await db.updateWithSchema('rsu_vest_events', {
-      id: event.id,
-      actual_net: deposit.amount,
+      id: match.eventId,
+      actual_net: match.amount,
     });
     result.matched.push({
-      eventId: event.id,
-      transactionId: deposit.id,
-      amount: deposit.amount,
+      eventId: match.eventId,
+      transactionId: match.transactionId,
+      amount: match.amount,
     });
   }
+  result.unmatched = plan.unmatched;
   return result;
-}
-
-function dayDistance(a: string, b: string): number {
-  return (
-    (new Date(`${a}T00:00:00Z`).getTime() -
-      new Date(`${b}T00:00:00Z`).getTime()) /
-    86_400_000
-  );
 }
 
 // Schedules

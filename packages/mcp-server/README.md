@@ -22,7 +22,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Transfers   | `find_transfer_candidates`, `link_transfers`, `move_transfers`                                                                                                                                                                                |
 | Budget      | `set_budget_amounts`                                                                                                                                                                                                                          |
 | Schedules   | `create_schedules`                                                                                                                                                                                                                            |
-| RSU grants  | `refresh_stock_prices`                                                                                                                                                                                                                        |
+| RSU grants  | `create_rsu_grant`, `update_rsu_grant`, `delete_rsu_grant`, `set_stock_price`, `refresh_stock_prices`, `lock_rsu_vest_prices`, `match_rsu_deposits`                                                                                           |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                                      |
 | Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                                       |
 
@@ -90,6 +90,19 @@ estimates use.
   has none yet. It needs a sync server and skips tickers whose price was set
   by hand unless `force` is true. The dry run lists the tickers it would
   fetch.
+- `create_rsu_grant` adds a grant from explicit vest rows or a cadence (start,
+  frequency, periods, optional cliff); `update_rsu_grant` changes its fields
+  and adds, edits or removes rows, including a row's vest price or the net
+  that actually arrived; `delete_rsu_grant` removes it with its open
+  schedules. Payees, accounts and categories are given by name or id, and a
+  missing payee is only created when `create_payee` is true.
+- `set_stock_price` sets a manual share price for a ticker (or, with
+  `use_live`, drops the override and fetches the quote again);
+  `lock_rsu_vest_prices` looks up the vest-date close for vested rows that
+  have none; `match_rsu_deposits` pairs past vests with the deposits from the
+  grant's payee and records them, after showing the pairings in its preview.
+- `get_rsu_grants` takes `grant`, `ticker` and `year`; with a year it also
+  returns the net per calendar month, the same grid the RSU Grants page shows.
 
 ### Transfers
 
