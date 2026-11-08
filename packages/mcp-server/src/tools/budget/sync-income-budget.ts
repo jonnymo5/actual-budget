@@ -4,11 +4,11 @@ import { defineTool } from '#tools/registry';
 
 const RSU_BUDGET_SYNC_PREF = 'rsu-budget-sync';
 
-export const syncRsuBudget = defineTool({
-  name: 'sync_rsu_budget',
-  title: 'Budget RSU income',
+export const syncIncomeBudget = defineTool({
+  name: 'sync_income_budget',
+  title: 'Budget expected income',
   description:
-    'Budget the income categories that RSU deposits land in, from this month to a year ahead: each month gets the summed net of every vest dated in it, across all grants in that category, and 0 when nothing vests. Vests are valued the same way get_rsu_grants does (recorded deposit, then vest-date price, then the current quote). Whatever was budgeted in those categories for those months is replaced; past months are never touched, and a month with a vest that has no price yet is left alone. Works only in a tracking budget, because an envelope budget cannot budget income. Pass auto true to keep doing this once a day after prices refresh (a synced setting, also on the RSU Grants page), or false to stop. Amounts are in major currency units (e.g. dollars, not cents); months are YYYY-MM.',
+    'Budget the income categories that money is expected in, from this month to a year ahead. A category is included when an RSU grant deposits into it, or when a schedule is tagged with it (create_schedules or set_schedule_category give a schedule its category). Each month gets the summed net of every RSU vest dated in it across all grants in the category, valued as get_rsu_grants does (recorded deposit, then vest-date price, then the current quote), plus every scheduled deposit due in it, and 0 when nothing is expected. Whatever was budgeted in those categories for those months is replaced; past months are never touched, and a month with a vest that has no price yet is left alone. Works only in a tracking budget, because an envelope budget cannot budget income. Pass auto true to keep doing this once a day (a synced setting, also on the RSU Grants page), or false to stop. Amounts are in major currency units (e.g. dollars, not cents); months are YYYY-MM.',
   kind: 'write',
   input: {
     auto: z
@@ -106,7 +106,7 @@ export const syncRsuBudget = defineTool({
     );
     const summary =
       changes.length === 0
-        ? `The RSU budget is already up to date (${result.unchanged} months checked).`
+        ? `The income budget is already up to date (${result.unchanged} category months checked).`
         : `${verb} ${changes.length} budgeted months:\n${lines.join('\n')}`;
     const notes = [
       data.unpriced.length > 0 &&

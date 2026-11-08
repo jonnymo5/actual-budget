@@ -10,7 +10,7 @@ import {
   estimateVestNet,
   generateVestEvents,
   planDepositMatches,
-  planRsuBudget,
+  planIncomeBudget,
   projectRsuIncomeByMonth,
   rsuScheduleName,
   summarizeGrantPayout,
@@ -347,7 +347,7 @@ describe('planDepositMatches', () => {
   });
 });
 
-describe('planRsuBudget', () => {
+describe('planIncomeBudget', () => {
   const grant = (
     id: string,
     overrides: Partial<RsuGrantEntity> = {},
@@ -377,7 +377,7 @@ describe('planRsuBudget', () => {
   const prices = [{ id: 'ABCD', price: 10000 }];
 
   it('sums every grant vesting in the same month and budgets 0 otherwise', () => {
-    const plan = planRsuBudget({
+    const plan = planIncomeBudget({
       grants: [grant('a'), grant('b')],
       events: [
         vest('a', '2025-03-08', 10),
@@ -397,7 +397,7 @@ describe('planRsuBudget', () => {
   });
 
   it('keeps categories apart and skips grants without one', () => {
-    const plan = planRsuBudget({
+    const plan = planIncomeBudget({
       grants: [
         grant('a'),
         grant('b', { category: 'cat-other' }),
@@ -418,7 +418,7 @@ describe('planRsuBudget', () => {
   });
 
   it('uses a recorded net or locked price before the current quote', () => {
-    const plan = planRsuBudget({
+    const plan = planIncomeBudget({
       grants: [grant('a')],
       events: [
         vest('a', '2025-03-01', 10, { actual_net: 12345 }),
@@ -438,7 +438,7 @@ describe('planRsuBudget', () => {
   });
 
   it('leaves out months with a vest that has no price', () => {
-    const plan = planRsuBudget({
+    const plan = planIncomeBudget({
       grants: [grant('a', { ticker: 'zzzz' })],
       events: [vest('a', '2025-03-22', 10)],
       prices,
@@ -452,8 +452,28 @@ describe('planRsuBudget', () => {
     ]);
   });
 
+  it('adds scheduled income to the same category and month', () => {
+    const plan = planIncomeBudget({
+      grants: [grant('a')],
+      events: [vest('a', '2025-03-22', 2)],
+      prices,
+      scheduled: [
+        { category: 'cat-stock', date: '2025-03-15', amount: 5000 },
+        { category: 'cat-bonus', date: '2025-04-15', amount: 300000 },
+        { category: 'cat-bonus', date: '2026-04-15', amount: 300000 },
+      ],
+      months: ['2025-03', '2025-04'],
+    });
+    expect(plan.amounts).toEqual([
+      { category: 'cat-stock', month: '2025-03', amount: 10000 + 5000 },
+      { category: 'cat-stock', month: '2025-04', amount: 0 },
+      { category: 'cat-bonus', month: '2025-03', amount: 0 },
+      { category: 'cat-bonus', month: '2025-04', amount: 300000 },
+    ]);
+  });
+
   it('ignores vests outside the months asked for', () => {
-    const plan = planRsuBudget({
+    const plan = planIncomeBudget({
       grants: [grant('a')],
       events: [vest('a', '2024-12-22', 10), vest('a', '2026-01-22', 10)],
       prices,

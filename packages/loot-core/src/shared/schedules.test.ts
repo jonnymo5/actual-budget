@@ -8,6 +8,7 @@ import {
   getHasTransactionsQuery,
   getNextDate,
   getNextDateAfter,
+  getOccurrencesInRange,
   getScheduleOccurrenceMatchStartDate,
   getStatus,
   getUpcomingDays,
@@ -641,5 +642,70 @@ describe('schedules', () => {
       expect(isCustomUpcomingLength(null)).toBe(false);
       expect(isCustomUpcomingLength(undefined)).toBe(false);
     });
+  });
+});
+
+describe('getOccurrencesInRange', () => {
+  it('lists every occurrence of a recurring schedule in the range', () => {
+    const cond = {
+      op: 'isapprox',
+      value: {
+        start: '2026-11-13',
+        frequency: 'monthly',
+        patterns: [
+          { type: 'day', value: 13 },
+          { type: 'day', value: 28 },
+        ],
+        skipWeekend: false,
+      },
+    };
+    expect(getOccurrencesInRange(cond, '2026-12-01', '2027-01-31')).toEqual([
+      '2026-12-13',
+      '2026-12-28',
+      '2027-01-13',
+      '2027-01-28',
+    ]);
+  });
+
+  it('applies weekend moves, including across a month boundary', () => {
+    // 2027-05-01 is a Saturday; moved before, it lands on Friday 2027-04-30.
+    const cond = {
+      op: 'isapprox',
+      value: {
+        start: '2027-01-01',
+        frequency: 'monthly',
+        skipWeekend: true,
+        weekendSolveMode: 'before',
+      },
+    };
+    expect(getOccurrencesInRange(cond, '2027-04-01', '2027-04-30')).toEqual([
+      '2027-04-01',
+      '2027-04-30',
+    ]);
+    expect(getOccurrencesInRange(cond, '2027-05-01', '2027-05-31')).toEqual([]);
+  });
+
+  it('respects the start and end of a recurrence', () => {
+    const cond = {
+      op: 'isapprox',
+      value: {
+        start: '2027-04-15',
+        frequency: 'yearly',
+        endMode: 'on_date',
+        endDate: '2028-12-31',
+      },
+    };
+    expect(getOccurrencesInRange(cond, '2026-01-01', '2030-12-31')).toEqual([
+      '2027-04-15',
+      '2028-04-15',
+    ]);
+  });
+
+  it('returns a one-off date only when it is in range', () => {
+    const cond = { op: 'is', value: '2027-04-15' };
+    expect(getOccurrencesInRange(cond, '2027-04-01', '2027-04-30')).toEqual([
+      '2027-04-15',
+    ]);
+    expect(getOccurrencesInRange(cond, '2027-05-01', '2027-05-31')).toEqual([]);
   });
 });

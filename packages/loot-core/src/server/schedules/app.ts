@@ -471,6 +471,39 @@ function discoverSchedules() {
   return findSchedules();
 }
 
+/**
+ * Set (or with `category` null, clear) the category a schedule's rule applies
+ * to the transaction it links to. The rule's other actions are kept. Income
+ * categories set this way also tell the income budget sync where a scheduled
+ * deposit belongs.
+ */
+export async function setScheduleCategory({
+  id,
+  category,
+}: {
+  id: string;
+  category: string | null;
+}): Promise<void> {
+  const rule = await getRuleForSchedule(id);
+  if (!rule) {
+    throw new Error('Schedule not found');
+  }
+  const actions = rule.serialize().actions;
+  const existing = actions.find(
+    action => action.op === 'set' && action.field === 'category',
+  );
+  if ((existing?.value ?? null) === (category ?? null)) {
+    return;
+  }
+  const others = actions.filter(action => action !== existing);
+  await updateRule({
+    id: rule.id,
+    actions: category
+      ? [...others, { op: 'set', field: 'category', value: category }]
+      : others,
+  });
+}
+
 async function getUpcomingDates({ config, count }) {
   const rules = recurConfigToRSchedule(config);
 
@@ -795,6 +828,7 @@ export type SchedulesHandlers = {
   'schedule/force-run-service': typeof advanceSchedulesService;
   'schedule/discover': typeof discoverSchedules;
   'schedule/get-upcoming-dates': typeof getUpcomingDates;
+  'schedule/set-category': typeof setScheduleCategory;
 };
 
 // Expose functions to the client
@@ -815,6 +849,7 @@ app.method(
 );
 app.method('schedule/discover', discoverSchedules);
 app.method('schedule/get-upcoming-dates', getUpcomingDates);
+app.method('schedule/set-category', mutator(undoable(setScheduleCategory)));
 
 app.service(trackJSONPaths);
 

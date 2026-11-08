@@ -337,6 +337,50 @@ export function getNextDateAfter(dateCond, afterDate: string): string | null {
   return null;
 }
 
+// A weekend move shifts a date by at most two days, so occurrences that far
+// outside the range can still land inside it.
+const WEEKEND_SHIFT_DAYS = 3;
+
+/**
+ * Every date a schedule's date condition falls on from `from` through `to`
+ * (inclusive, YYYY-MM-DD), with its weekend moves applied. A one-off schedule
+ * has just its own date.
+ */
+export function getOccurrencesInRange(
+  dateCond: { op: string; value: unknown },
+  from: string,
+  to: string,
+): string[] {
+  const cond = new Condition(dateCond.op, 'date', dateCond.value, null);
+  const value = cond.getValue();
+  if (value.type === 'date') {
+    return value.date >= from && value.date <= to ? [value.date] : [];
+  }
+  if (value.type !== 'recur') {
+    return [];
+  }
+  const { schedule } = value;
+  return schedule
+    .occurrences({
+      start: d.startOfDay(
+        d.subDays(monthUtils.parseDate(from), WEEKEND_SHIFT_DAYS),
+      ),
+      end: d.endOfDay(d.addDays(monthUtils.parseDate(to), WEEKEND_SHIFT_DAYS)),
+    })
+    .toArray()
+    .map(occurrence =>
+      monthUtils.dayFromDate(
+        schedule.data.skipWeekend
+          ? getDateWithSkippedWeekend(
+              occurrence.date,
+              schedule.data.weekendSolve,
+            )
+          : occurrence.date,
+      ),
+    )
+    .filter(day => day >= from && day <= to);
+}
+
 export function getDateWithSkippedWeekend(
   date: Date,
   solveMode: 'after' | 'before',

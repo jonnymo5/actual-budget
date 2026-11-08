@@ -21,6 +21,8 @@ export type ScheduleRequest = {
   end_after_occurrences?: number;
   end_date?: string;
   posts_transaction: boolean;
+  /** Category name or id the linked transaction gets. */
+  category?: string;
 };
 
 const AMOUNT_OPS = {
@@ -38,6 +40,8 @@ export type ScheduleDraft = {
   amount: number | { num1: number; num2: number };
   amountOp: (typeof AMOUNT_OPS)[keyof typeof AMOUNT_OPS];
   postsTransaction: boolean;
+  /** Set on the transaction the schedule links to. */
+  category: NamedId | null;
   /** A single date for a one-off schedule, otherwise the recurrence. */
   date: string | RecurConfig;
   warnings: string[];
@@ -132,9 +136,13 @@ export async function planSchedule(
 
   let account: NamedId;
   let payee: NamedId;
+  let category: NamedId | null = null;
   try {
     account = await lookups.account(request.account);
     payee = await lookups.payee(request.payee, { allowTransfers: true });
+    if (request.category) {
+      category = await lookups.category(request.category);
+    }
   } catch (error) {
     if (isToolError(error)) {
       return { reason: (error as Error).message };
@@ -181,6 +189,7 @@ export async function planSchedule(
           : lower,
       amountOp: AMOUNT_OPS[request.amount_match],
       postsTransaction: request.posts_transaction,
+      category,
       date: repeats ? config : request.start_date,
       warnings,
     },

@@ -311,31 +311,42 @@ export function projectRsuIncomeByMonth({
   };
 }
 
-export type RsuBudgetAmount = {
+export type IncomeBudgetAmount = {
   category: string;
   /** YYYY-MM */
   month: string;
-  /** Net cents of every vest in the month, summed across grants */
+  /** Net cents expected in the month, summed across every source */
   amount: number;
 };
 
-export type RsuBudgetPlan = {
-  amounts: RsuBudgetAmount[];
+export type IncomeBudgetPlan = {
+  amounts: IncomeBudgetAmount[];
   /** Months left out because a vest in them has no price to value it with. */
   unpriced: Array<{ category: string; month: string; ticker: string }>;
 };
 
+export type ScheduledIncome = {
+  category: string;
+  /** YYYY-MM-DD, one entry per occurrence */
+  date: string;
+  /** Integer cents */
+  amount: number;
+};
+
 /**
- * What to budget in each income category that RSU deposits land in: for every
- * month given, the summed net of all vests dated in that month across every
- * grant in the category, or 0 when nothing vests. A month with a vest that
+ * What to budget in each income category the plan owns: every category an
+ * RSU grant deposits into, and every category a scheduled deposit is tagged
+ * with. For every month given, the amount is the summed net of the vests
+ * dated in it across all grants in the category, plus every scheduled
+ * deposit in it, or 0 when nothing is expected. A month with a vest that
  * cannot be valued is left out of `amounts` so its budget is not overwritten
  * with a figure that is too low.
  */
-export function planRsuBudget({
+export function planIncomeBudget({
   grants,
   events,
   prices,
+  scheduled = [],
   months,
 }: {
   grants: ReadonlyArray<
@@ -348,21 +359,28 @@ export function planRsuBudget({
     >
   >;
   prices: ReadonlyArray<Pick<StockPriceEntity, 'id' | 'price'>>;
+  scheduled?: ReadonlyArray<ScheduledIncome>;
   /** YYYY-MM months to plan */
   months: ReadonlyArray<string>;
-}): RsuBudgetPlan {
+}): IncomeBudgetPlan {
   const priceByTicker = new Map(prices.map(price => [price.id, price]));
   const wanted = new Set(months);
   const totals = new Map<string, Map<string, number>>();
   const unpriced = new Map<string, { month: string; ticker: string }>();
+  const add = (category: string, month: string, amount: number) => {
+    const byMonth = totals.get(category) ?? new Map<string, number>();
+    totals.set(category, byMonth);
+    byMonth.set(month, (byMonth.get(month) ?? 0) + amount);
+  };
 
   for (const grant of grants) {
     if (!grant.category) {
       continue;
     }
     const category = grant.category;
-    const byMonth = totals.get(category) ?? new Map<string, number>();
-    totals.set(category, byMonth);
+    if (!totals.has(category)) {
+      totals.set(category, new Map());
+    }
     const ticker = normalizeTicker(grant.ticker);
     const price = priceByTicker.get(ticker);
 
@@ -376,11 +394,21 @@ export function planRsuBudget({
         unpriced.set(`${category}|${month}`, { month, ticker });
         continue;
       }
-      byMonth.set(month, (byMonth.get(month) ?? 0) + net);
+      add(category, month, net);
     }
   }
 
-  const amounts: RsuBudgetAmount[] = [];
+  for (const income of scheduled) {
+    if (!totals.has(income.category)) {
+      totals.set(income.category, new Map());
+    }
+    const month = income.date.slice(0, 7);
+    if (wanted.has(month)) {
+      add(income.category, month, income.amount);
+    }
+  }
+
+  const amounts: IncomeBudgetAmount[] = [];
   for (const [category, byMonth] of totals) {
     for (const month of months) {
       if (!unpriced.has(`${category}|${month}`)) {

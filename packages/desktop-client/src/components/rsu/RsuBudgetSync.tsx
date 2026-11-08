@@ -37,7 +37,7 @@ export function RsuBudgetSync({ hasGrants }: RsuBudgetSyncProps) {
         notification: {
           type: 'message',
           message: t(
-            'Budgeted RSU income for the next 12 months ({{count}} months changed).',
+            'Budgeted expected income for the next 12 months ({{count}} months changed).',
             { count: result.changes.length },
           ),
         },
@@ -61,12 +61,13 @@ export function RsuBudgetSync({ hasGrants }: RsuBudgetSyncProps) {
       />
       <View style={{ gap: 2 }}>
         <label htmlFor="rsu-budget-sync" style={{ fontWeight: 600 }}>
-          <Trans>Budget RSU income automatically</Trans>
+          <Trans>Budget expected income automatically</Trans>
         </label>
         <Text style={{ color: theme.pageTextSubdued, fontSize: 12 }}>
           <Trans>
             Once a day, after prices refresh, each month from now to a year
-            ahead is budgeted with the net of every vest in it. This replaces
+            ahead is budgeted with the net of every vest in it plus every
+            scheduled deposit tagged with an income category. This replaces
             whatever was budgeted in those income categories.
           </Trans>
         </Text>

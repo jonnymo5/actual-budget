@@ -14,16 +14,18 @@ import {
   createSchedule,
   deleteSchedule,
   getRuleForSchedule,
+  setScheduleCategory,
   updateSchedule,
 } from '#server/schedules/app';
 import { getServer } from '#server/server-config';
-import { updateRule } from '#server/transactions/transaction-rules';
 import { undoable } from '#server/undo';
 import {
   addDays,
   addMonths,
   currentDay,
   currentMonth,
+  firstDayOfMonth,
+  lastDayOfMonth,
   rangeInclusive,
   subDays,
 } from '#shared/months';
@@ -35,12 +37,17 @@ import {
   isValidTicker,
   normalizeTicker,
   planDepositMatches,
-  planRsuBudget,
+  planIncomeBudget,
   roundShares,
   rsuScheduleName,
   vestEventNet,
 } from '#shared/rsu';
-import { extractScheduleConds } from '#shared/schedules';
+import type { ScheduledIncome } from '#shared/rsu';
+import {
+  extractScheduleConds,
+  getOccurrencesInRange,
+  getScheduledAmount,
+} from '#shared/schedules';
 import { amountToInteger } from '#shared/util';
 import type {
   RsuGrantEntity,
@@ -856,22 +863,9 @@ async function ensureCategoryAction(
   scheduleId: string,
   category: string | null,
 ) {
-  const rule = await getRuleForSchedule(scheduleId);
-  if (!rule) {
-    return;
+  if (await getRuleForSchedule(scheduleId)) {
+    await setScheduleCategory({ id: scheduleId, category });
   }
-  const actions = rule.serialize().actions as RuleActionEntity[];
-  const existing = findCategoryAction(actions);
-  const existingValue =
-    existing && 'value' in existing ? (existing.value as string) : null;
-  if ((existingValue ?? null) === (category ?? null)) {
-    return;
-  }
-  const others = actions.filter(action => action !== existing);
-  const wanted: RuleActionEntity[] = category
-    ? [...others, { op: 'set', field: 'category', value: category }]
-    : others;
-  await updateRule({ id: rule.id, actions: wanted });
 }
 
 function scheduleNeedsUpdate(
@@ -1048,11 +1042,62 @@ export function isBudgetSyncEnabled(): boolean {
 }
 
 /**
- * Budget the income categories that RSU deposits land in, from this month to
- * a year ahead: each month gets the summed net of every vest dated in it,
- * across all grants in that category, and 0 when nothing vests. The sync owns
- * those categories, so whatever was budgeted there before is replaced. Past
- * months are never touched. Only a tracking budget can budget income.
+ * Every occurrence from `from` through `to` of the schedules tagged with one
+ * of `incomeCategories`, except the ones RSU grants own (their vests are
+ * counted from the grant). A completed schedule only counts the occurrences
+ * that are already behind it, so a deposit that arrived this month keeps its
+ * place in the budget.
+ */
+async function getScheduledIncome(
+  incomeCategories: ReadonlySet<string>,
+  from: string,
+  to: string,
+): Promise<ScheduledIncome[]> {
+  const { data } = await aqlQuery(
+    q('schedules').select([
+      'id',
+      'completed',
+      '_conditions',
+      '_actions',
+      '_rsu_vest_event',
+    ]),
+  );
+  const today = currentDay();
+  const income: ScheduledIncome[] = [];
+  for (const schedule of data as ScheduleEntity[]) {
+    if (schedule._rsu_vest_event) {
+      continue;
+    }
+    const action = findCategoryAction(schedule._actions);
+    const category =
+      action && 'value' in action ? (action.value as string | null) : null;
+    if (!category || !incomeCategories.has(category)) {
+      continue;
+    }
+    const conds = extractScheduleConds(schedule._conditions ?? []);
+    if (!conds.date || !conds.amount) {
+      continue;
+    }
+    const amount = getScheduledAmount(conds.amount.value);
+    for (const date of getOccurrencesInRange(conds.date, from, to)) {
+      if (schedule.completed && date > today) {
+        continue;
+      }
+      income.push({ category, date, amount });
+    }
+  }
+  return income;
+}
+
+/**
+ * Budget the income categories that money is expected in, from this month to
+ * a year ahead. A category is included when an RSU grant deposits into it or
+ * a schedule is tagged with it (through the schedule's set-category action).
+ * Each month gets the summed net of every vest dated in it across all grants
+ * in that category plus every scheduled deposit in it, and 0 when nothing is
+ * expected. The sync owns those categories, so whatever was budgeted there
+ * before is replaced. Past months are never touched. Only a tracking budget
+ * can budget income.
  */
 export async function syncBudget({
   dryRun = false,
@@ -1086,14 +1131,17 @@ export async function syncBudget({
   });
 
   const thisMonth = currentMonth();
-  const plan = planRsuBudget({
+  const lastMonth = addMonths(thisMonth, BUDGET_MONTHS_AHEAD);
+  const plan = planIncomeBudget({
     grants: budgeted,
     events,
     prices,
-    months: rangeInclusive(
-      thisMonth,
-      addMonths(thisMonth, BUDGET_MONTHS_AHEAD),
+    scheduled: await getScheduledIncome(
+      incomeCategories,
+      firstDayOfMonth(thisMonth),
+      lastDayOfMonth(lastMonth),
     ),
+    months: rangeInclusive(thisMonth, lastMonth),
   });
   result.unpriced = plan.unpriced;
 
