@@ -148,3 +148,108 @@ export async function fetchQuote(
   }
   return { symbol, reason: sawError ? 'provider-error' : 'not-found' };
 }
+
+export type HistoricalClose = {
+  /** Trading day, YYYY-MM-DD in the exchange's local time */
+  date: string;
+  /** Major currency units */
+  close: number;
+};
+
+export type PriceHistory = {
+  symbol: string;
+  currency: string | null;
+  closes: HistoricalClose[];
+};
+
+function toUnixSeconds(isoDate: string): number {
+  return Math.floor(new Date(`${isoDate}T00:00:00Z`).getTime() / 1000);
+}
+
+/**
+ * Daily closes between two dates (inclusive) from Yahoo Finance's chart
+ * endpoint. Closes are the raw ones, not split-adjusted, which is what a vest
+ * that happened on that day was worth.
+ */
+export async function fetchYahooHistory(
+  symbol: string,
+  fromDate: string,
+  toDate: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<PriceHistory | null> {
+  const period1 = toUnixSeconds(fromDate);
+  const period2 = toUnixSeconds(toDate) + 24 * 60 * 60;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
+  const res = await fetchImpl(url, {
+    headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`Yahoo Finance responded with ${res.status}`);
+  }
+
+  const body = (await res.json()) as {
+    chart?: {
+      result?: Array<{
+        meta?: { currency?: unknown; gmtoffset?: unknown };
+        timestamp?: unknown;
+        indicators?: { quote?: Array<{ close?: unknown }> };
+      }> | null;
+      error?: unknown;
+    };
+  };
+  const result = body?.chart?.result?.[0];
+  if (!result) {
+    if (body?.chart?.error) {
+      return null;
+    }
+    throw new Error('Yahoo Finance response had no data');
+  }
+
+  const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const rawCloses = result.indicators?.quote?.[0]?.close;
+  const closeValues = Array.isArray(rawCloses) ? rawCloses : [];
+  const gmtOffset =
+    typeof result.meta?.gmtoffset === 'number' ? result.meta.gmtoffset : 0;
+
+  const closes: HistoricalClose[] = [];
+  timestamps.forEach((timestamp, index) => {
+    const close = closeValues[index];
+    if (typeof timestamp !== 'number' || typeof close !== 'number') {
+      return;
+    }
+    if (!Number.isFinite(close)) {
+      return;
+    }
+    const date = new Date((timestamp + gmtOffset) * 1000)
+      .toISOString()
+      .slice(0, 10);
+    closes.push({ date, close });
+  });
+  closes.sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    symbol,
+    currency:
+      typeof result.meta?.currency === 'string' ? result.meta.currency : null,
+    closes,
+  };
+}
+
+/** The last close on or before `date`, for markets that were shut that day. */
+export function closeOnOrBefore(
+  closes: HistoricalClose[],
+  date: string,
+): HistoricalClose | null {
+  let found: HistoricalClose | null = null;
+  for (const close of closes) {
+    if (close.date > date) {
+      break;
+    }
+    found = close;
+  }
+  return found;
+}

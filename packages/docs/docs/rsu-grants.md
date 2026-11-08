@@ -24,13 +24,23 @@ Each row is one vest: a date and a share count. You can type the rows in by hand
 - **Frequency** and **Periods** describe the regular vests, for example quarterly for 16 periods.
 - **Cliff** and **Cliff after (months)** add a first, larger vest. A grant that vests 25% after one year and then quarterly is `25%`, `12` months, quarterly, `12` periods.
 
-Generated rows always add up to the total shares, and you can edit, add or remove rows afterwards. Rows in the past get no schedule; record what you actually received in **Actual net** instead and the year grid will use that figure.
+Generated rows always add up to the total shares, and you can edit, add or remove rows afterwards.
+
+### What a vest is worth
+
+Each row is valued from the most certain source available:
+
+1. **Actual net**: the deposit that really arrived. Enter it on the row, or use **Match deposits to past vests** from a grant's menu to pair past rows with the deposits from the grant's payee that landed closest to each vest date.
+2. **Vest price**: the share price on the vest date. Once a row's date has passed, Actual looks up that day's closing price (or the last trading day before it) through your sync server and locks it on the row. You can type a different price if your employer values vests differently.
+3. **Current price**: for rows still to vest, the latest quote.
+
+Because past rows are locked, the **Paid out** figure on a grant shows what it really produced, and only **Remaining** moves with the market. Rows in the past get no schedule.
 
 ## Share prices
 
 Every ticker has one price, shared by all grants that use it. Prices are shown at the top of the page.
 
-- **Refresh prices** fetches current prices through your sync server. Actual also refreshes them once a day after the first sync of the day. Prices come from public market data and may be delayed.
+- **Refresh prices** fetches current prices through your sync server and locks the vest-date price of any vest that has happened since. Actual also does both once a day after the first sync of the day. Prices come from public market data and may be delayed.
 - **Set price** lets you type a price. A price set by hand is kept until you choose **Use live price** again.
 - Without a sync server, prices are always entered by hand.
 
@@ -42,4 +52,4 @@ Each future vest row becomes a one-off, non-posting schedule named `RSU · <gran
 
 Because they are ordinary schedules, RSU vests are included in the [Balance Forecast](./reports/index.md), can be referenced from [budget templates](./experimental/goal-templates.md) with `#template schedule RSU · <grant> · <date>`, and are visible to any tool that reads schedules.
 
-The grid at the bottom of the page shows the estimated net per grant and per month for one year, with recorded amounts highlighted, so you can see what a year of vests is worth while planning your budget.
+The grid at the bottom of the page shows the net per grant and per month for one year, with recorded deposits highlighted, so you can see what a year of vests is worth while planning your budget.

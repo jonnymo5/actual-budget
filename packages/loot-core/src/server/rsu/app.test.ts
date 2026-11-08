@@ -14,6 +14,8 @@ import {
   createGrant,
   deleteGrant,
   getRsuData,
+  lockVestPrices,
+  matchDeposits,
   refreshPrices,
   setPrice,
   syncSchedules,
@@ -70,6 +72,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await schedulesApp.stopServices();
   delete mockServerHandlers['/stock-quote/quotes'];
+  delete mockServerHandlers['/stock-quote/history'];
   setServer('https://test.env');
 });
 
@@ -425,5 +428,131 @@ describe('refreshPrices', () => {
     expect(forced.updated).toEqual(['ABCD']);
     const { prices } = await getRsuData();
     expect(prices[0]).toMatchObject({ price: 20000, manual_override: false });
+  });
+});
+
+describe('lockVestPrices', () => {
+  const pastEvents = [
+    { vest_date: '2024-10-15', shares: 10 },
+    { vest_date: '2024-11-16', shares: 10 },
+  ];
+
+  it('stores the close on each past vest date and leaves future rows alone', async () => {
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    const grantId = await createGrant({
+      grant: baseGrant(),
+      events: [...pastEvents, { vest_date: '2025-04-15', shares: 10 }],
+    });
+    vi.mocked(asyncStorage.getItem).mockResolvedValue('test-token');
+    const calls: unknown[] = [];
+    mockServerHandlers['/stock-quote/history'] = (data: unknown) => {
+      calls.push(data);
+      return {
+        symbol: 'ABCD',
+        currency: 'USD',
+        closes: [
+          { date: '2024-10-15', close: 80.5, close_date: '2024-10-15' },
+          { date: '2024-11-16', close: 90, close_date: '2024-11-15' },
+        ],
+        errors: [],
+      };
+    };
+
+    const result = await lockVestPrices({ grantId });
+
+    expect(calls).toEqual([
+      { symbol: 'ABCD', dates: ['2024-10-15', '2024-11-16'] },
+    ]);
+    expect(result.locked).toHaveLength(2);
+    expect(result.failed).toEqual([]);
+    const { events } = await getRsuData();
+    expect(
+      events
+        .map(event => [event.vest_date, event.actual_price] as const)
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    ).toEqual([
+      ['2024-10-15', 8050],
+      ['2024-11-16', 9000],
+      ['2025-04-15', null],
+    ]);
+
+    // Locked rows no longer follow the quote.
+    await setPrice({ ticker: 'ABCD', price: 99900 });
+    const again = await lockVestPrices({ grantId });
+    expect(again.locked).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reports dates the provider cannot price and a missing server', async () => {
+    const grantId = await createGrant({
+      grant: baseGrant(),
+      events: pastEvents,
+    });
+    vi.mocked(asyncStorage.getItem).mockResolvedValue('test-token');
+    mockServerHandlers['/stock-quote/history'] = () => ({
+      symbol: 'ABCD',
+      currency: 'USD',
+      closes: [{ date: '2024-10-15', close: 80, close_date: '2024-10-15' }],
+      errors: [{ date: '2024-11-16', reason: 'not-found' }],
+    });
+
+    const result = await lockVestPrices({ grantId });
+    expect(result.locked).toHaveLength(1);
+    expect(result.failed).toEqual([
+      { eventId: expect.any(String), reason: 'not-found' },
+    ]);
+
+    setServer(null as unknown as string);
+    const offline = await lockVestPrices({ grantId });
+    expect(offline.error).toBe('no-server');
+    expect(offline.failed).toHaveLength(1);
+  });
+});
+
+describe('matchDeposits', () => {
+  it('records the nearest deposit from the payee as the actual net', async () => {
+    const grantId = await createGrant({
+      grant: baseGrant(),
+      events: [
+        { vest_date: '2024-10-15', shares: 10 },
+        { vest_date: '2024-11-15', shares: 10 },
+        { vest_date: '2024-12-15', shares: 10 },
+      ],
+    });
+    const otherPayee = await db.insertPayee({ name: 'Someone else' });
+    for (const [date, amount, payee] of [
+      ['2024-10-18', 61000, payeeId],
+      ['2024-10-16', 500, otherPayee],
+      ['2024-11-20', 59000, payeeId],
+      ['2024-11-01', 1000, payeeId],
+    ] as const) {
+      await db.insertTransaction({
+        account: accountId,
+        payee,
+        date,
+        amount,
+        cleared: true,
+      });
+    }
+
+    const result = await matchDeposits({ grantId });
+
+    expect(
+      result.matched.map(match => match.amount).sort((a, b) => a - b),
+    ).toEqual([59000, 61000]);
+    expect(result.unmatched).toHaveLength(1);
+    const { events } = await getRsuData();
+    expect(
+      events
+        .map(event => [event.vest_date, event.actual_net] as const)
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    ).toEqual([
+      ['2024-10-15', 61000],
+      ['2024-11-15', 59000],
+      ['2024-12-15', null],
+    ]);
+
+    // Already matched rows are left alone on a second run.
+    expect((await matchDeposits({ grantId })).matched).toEqual([]);
   });
 });

@@ -54,13 +54,17 @@ const grantsSchema = z.object({
       ticker: z.string(),
       total_shares: z.number(),
       withholding_rate: z.number(),
-      unvested_est_net: z.number().nullable(),
+      paid_out_net: z.number(),
+      remaining_est_net: z.number(),
+      unvalued_rows: z.number(),
       vest_events: z.array(
         z.object({
           vest_date: z.string(),
           shares: z.number(),
+          vest_price: z.number().nullable(),
           est_gross: z.number().nullable(),
           est_net: z.number().nullable(),
+          basis: z.enum(['actual', 'locked', 'current']).nullable(),
           actual_net: z.number().nullable(),
           schedule_id: z.string().nullable(),
         }),
@@ -82,6 +86,7 @@ const refreshSchema = z.object({
   updated: z.array(z.string()),
   skipped: z.array(z.string()),
   failed: z.array(z.object({ symbol: z.string(), reason: z.string() })),
+  locked_vests: z.number(),
   error: z.string().nullable(),
   dry_run: z.boolean(),
 });
@@ -101,13 +106,17 @@ describe('get_rsu_grants', () => {
       total_shares: 30,
       withholding_rate: 0.4,
       // 3 × 10 shares × $100 × 60%
-      unvested_est_net: 1800,
+      remaining_est_net: 1800,
+      paid_out_net: 0,
+      unvalued_rows: 0,
     });
     expect(grant.vest_events.map(row => row.vest_date)).toEqual(VEST_DATES);
     expect(grant.vest_events[0]).toMatchObject({
       shares: 10,
+      vest_price: null,
       est_gross: 1000,
       est_net: 600,
+      basis: 'current',
       actual_net: null,
     });
     expect(grant.vest_events.every(row => row.schedule_id)).toBe(true);
@@ -144,6 +153,7 @@ describe('refresh_stock_prices', () => {
       updated: ['ABCD'],
       skipped: [],
       failed: [],
+      locked_vests: 0,
       error: null,
       dry_run: true,
     });

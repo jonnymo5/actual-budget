@@ -81,10 +81,15 @@ estimates use.
   `RSU · <grant> · <date>` for its estimated net, so `get_schedules` and
   `cash_flow_projection` already include RSU income. Those schedules are
   managed by the grant; change the grant rather than the schedule.
-- `refresh_stock_prices` asks the sync server for current prices and rewrites
-  the schedule amounts. It needs a sync server and skips tickers whose price
-  was set by hand unless `force` is true. The dry run lists the tickers it
-  would fetch.
+- Once a vest has happened its share price is locked at that day's close, and
+  the user can record the deposit that actually arrived, so `paid_out_net`
+  and the past rows do not move with the market. `basis` on each row says
+  which of the three the number comes from.
+- `refresh_stock_prices` asks the sync server for current prices, rewrites
+  the schedule amounts and locks the vest-date price of any past vest that
+  has none yet. It needs a sync server and skips tickers whose price was set
+  by hand unless `force` is true. The dry run lists the tickers it would
+  fetch.
 
 ### Transfers
 

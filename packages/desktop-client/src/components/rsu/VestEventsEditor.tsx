@@ -10,9 +10,9 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import {
-  estimateVestNet,
   roundShares,
   sumShares,
+  vestEventValue,
 } from '@actual-app/core/shared/rsu';
 
 import { FinancialText } from '#components/FinancialText';
@@ -33,6 +33,8 @@ export type VestRowDraft = {
   id?: string;
   vest_date: string;
   shares: number;
+  /** Share price locked on the vest date, cents */
+  actual_price: number | null;
   actual_net: number | null;
   schedule: string | null;
 };
@@ -48,12 +50,13 @@ type VestEventsEditorProps = {
 };
 
 const COLUMNS = {
-  date: 150,
-  shares: 110,
-  gross: 120,
-  net: 120,
-  status: 130,
-  actual: 130,
+  date: 140,
+  shares: 90,
+  price: 120,
+  gross: 110,
+  net: 110,
+  status: 120,
+  actual: 120,
   remove: 36,
 };
 
@@ -86,6 +89,7 @@ export function VestEventsEditor({
         key: newRowKey(),
         vest_date: last?.vest_date ?? today,
         shares: last?.shares ?? 0,
+        actual_price: null,
         actual_net: null,
         schedule: null,
       },
@@ -151,8 +155,9 @@ export function VestEventsEditor({
         >
           {headerCell(COLUMNS.date, t('Vest date'))}
           {headerCell(COLUMNS.shares, t('Shares'), 'right')}
-          {headerCell(COLUMNS.gross, t('Est. gross'), 'right')}
-          {headerCell(COLUMNS.net, t('Est. net'), 'right')}
+          {headerCell(COLUMNS.price, t('Vest price'), 'right')}
+          {headerCell(COLUMNS.gross, t('Gross'), 'right')}
+          {headerCell(COLUMNS.net, t('Net'), 'right')}
           {headerCell(COLUMNS.status, t('Status'))}
           {headerCell(COLUMNS.actual, t('Actual net'), 'right')}
           {headerCell(COLUMNS.remove, '')}
@@ -167,14 +172,12 @@ export function VestEventsEditor({
         )}
 
         {rows.map(row => {
-          const estimate =
-            priceCents != null
-              ? estimateVestNet({
-                  shares: row.shares,
-                  priceCents,
-                  withholdingRate,
-                })
-              : null;
+          const estimate = vestEventValue(
+            row,
+            { withholding_rate: withholdingRate },
+            priceCents != null ? { price: priceCents } : null,
+          );
+          const isCurrentEstimate = estimate?.basis === 'current';
           const status = row.id
             ? statusByEvent.get(row.id)
             : getVestStatus({
@@ -214,15 +217,37 @@ export function VestEventsEditor({
                   }
                 />
               </View>
+              <View style={{ width: COLUMNS.price, padding: '0 5px' }}>
+                <AmountInput
+                  value={row.actual_price ?? 0}
+                  sign="+"
+                  onUpdate={amount =>
+                    update(row.key, {
+                      actual_price: amount > 0 ? amount : null,
+                    })
+                  }
+                />
+              </View>
               <View
                 style={{
                   width: COLUMNS.gross,
                   padding: '0 5px',
                   textAlign: 'right',
                 }}
+                title={
+                  isCurrentEstimate
+                    ? t('Estimated from the current share price')
+                    : undefined
+                }
               >
                 {estimate && (
-                  <FinancialText>
+                  <FinancialText
+                    style={{
+                      color: isCurrentEstimate
+                        ? theme.pageTextSubdued
+                        : theme.tableText,
+                    }}
+                  >
                     <PrivacyFilter>
                       {format(estimate.gross, 'financial')}
                     </PrivacyFilter>
@@ -237,7 +262,13 @@ export function VestEventsEditor({
                 }}
               >
                 {estimate && (
-                  <FinancialText style={{ color: theme.noticeTextLight }}>
+                  <FinancialText
+                    style={{
+                      color: isCurrentEstimate
+                        ? theme.pageTextSubdued
+                        : theme.noticeTextLight,
+                    }}
+                  >
                     <PrivacyFilter>
                       {format(estimate.net, 'financial')}
                     </PrivacyFilter>
