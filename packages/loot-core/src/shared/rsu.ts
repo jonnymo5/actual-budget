@@ -311,6 +311,92 @@ export function projectRsuIncomeByMonth({
   };
 }
 
+export type RsuBudgetAmount = {
+  category: string;
+  /** YYYY-MM */
+  month: string;
+  /** Net cents of every vest in the month, summed across grants */
+  amount: number;
+};
+
+export type RsuBudgetPlan = {
+  amounts: RsuBudgetAmount[];
+  /** Months left out because a vest in them has no price to value it with. */
+  unpriced: Array<{ category: string; month: string; ticker: string }>;
+};
+
+/**
+ * What to budget in each income category that RSU deposits land in: for every
+ * month given, the summed net of all vests dated in that month across every
+ * grant in the category, or 0 when nothing vests. A month with a vest that
+ * cannot be valued is left out of `amounts` so its budget is not overwritten
+ * with a figure that is too low.
+ */
+export function planRsuBudget({
+  grants,
+  events,
+  prices,
+  months,
+}: {
+  grants: ReadonlyArray<
+    Pick<RsuGrantEntity, 'id' | 'ticker' | 'category' | 'withholding_rate'>
+  >;
+  events: ReadonlyArray<
+    Pick<
+      RsuVestEventEntity,
+      'grant_id' | 'vest_date' | 'shares' | 'actual_net' | 'actual_price'
+    >
+  >;
+  prices: ReadonlyArray<Pick<StockPriceEntity, 'id' | 'price'>>;
+  /** YYYY-MM months to plan */
+  months: ReadonlyArray<string>;
+}): RsuBudgetPlan {
+  const priceByTicker = new Map(prices.map(price => [price.id, price]));
+  const wanted = new Set(months);
+  const totals = new Map<string, Map<string, number>>();
+  const unpriced = new Map<string, { month: string; ticker: string }>();
+
+  for (const grant of grants) {
+    if (!grant.category) {
+      continue;
+    }
+    const category = grant.category;
+    const byMonth = totals.get(category) ?? new Map<string, number>();
+    totals.set(category, byMonth);
+    const ticker = normalizeTicker(grant.ticker);
+    const price = priceByTicker.get(ticker);
+
+    for (const event of events) {
+      const month = event.vest_date.slice(0, 7);
+      if (event.grant_id !== grant.id || !wanted.has(month)) {
+        continue;
+      }
+      const net = vestEventNet(event, grant, price);
+      if (net == null) {
+        unpriced.set(`${category}|${month}`, { month, ticker });
+        continue;
+      }
+      byMonth.set(month, (byMonth.get(month) ?? 0) + net);
+    }
+  }
+
+  const amounts: RsuBudgetAmount[] = [];
+  for (const [category, byMonth] of totals) {
+    for (const month of months) {
+      if (!unpriced.has(`${category}|${month}`)) {
+        amounts.push({ category, month, amount: byMonth.get(month) ?? 0 });
+      }
+    }
+  }
+  return {
+    amounts,
+    unpriced: [...unpriced].map(([key, value]) => ({
+      category: key.slice(0, key.indexOf('|')),
+      ...value,
+    })),
+  };
+}
+
 export const RSU_SCHEDULE_PREFIX = 'RSU · ';
 
 export function rsuScheduleName(

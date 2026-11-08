@@ -1,7 +1,10 @@
 import * as asyncStorage from '#platform/server/asyncStorage';
 import { aqlQuery } from '#server/aql';
+import { getBudget, setBudget } from '#server/budget/actions';
 import * as db from '#server/db';
 import { loadMappings } from '#server/db/mappings';
+import { runMutator } from '#server/mutators';
+import * as prefs from '#server/prefs';
 import { app as schedulesApp } from '#server/schedules/app';
 import { setServer } from '#server/server-config';
 import { handlers } from '#server/tests/mockSyncServer';
@@ -11,13 +14,16 @@ import { q } from '#shared/query';
 import type { RuleEntity, ScheduleEntity } from '#types/models';
 
 import {
+  app,
   createGrant,
   deleteGrant,
   getRsuData,
+  isBudgetSyncEnabled,
   lockVestPrices,
   matchDeposits,
   refreshPrices,
   setPrice,
+  syncBudget,
   syncSchedules,
   updateGrant,
   updateVestEvent,
@@ -554,5 +560,168 @@ describe('matchDeposits', () => {
 
     // Already matched rows are left alone on a second run.
     expect((await matchDeposits({ grantId })).matched).toEqual([]);
+  });
+});
+
+describe('syncBudget', () => {
+  async function useTrackingBudget() {
+    await db.update('preferences', { id: 'budgetType', value: 'tracking' });
+  }
+
+  it('budgets the summed net of every grant vesting in a month', async () => {
+    await useTrackingBudget();
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+    await createGrant({
+      grant: baseGrant({ name: 'Grant B' }),
+      events: [
+        { vest_date: '2025-04-22', shares: 4 },
+        { vest_date: '2025-05-22', shares: 2 },
+      ],
+    });
+    // A guess typed in by hand is replaced; a past month is not touched.
+    await setBudget({ category: categoryId, month: '2025-02', amount: 99900 });
+    await setBudget({ category: categoryId, month: '2024-12', amount: 77700 });
+
+    const result = await syncBudget();
+
+    expect(result.skipped).toBeUndefined();
+    // 2025-01 through 2026-01: thirteen months
+    expect(result.changes.length + result.unchanged).toBe(13);
+    const budgeted = (month: string) =>
+      getBudget({ category: categoryId, month });
+    // Grant A: 10 shares × $100 × 50%; Grant B: 4 shares the same month
+    expect(budgeted('2025-04')).toBe(50000 + 20000);
+    expect(budgeted('2025-05')).toBe(10000);
+    expect(budgeted('2025-07')).toBe(50000);
+    expect(budgeted('2026-01')).toBe(50000);
+    expect(budgeted('2025-02')).toBe(0);
+    expect(budgeted('2025-03')).toBe(0);
+    expect(budgeted('2024-12')).toBe(77700);
+    expect(result.changes).toContainEqual({
+      category: categoryId,
+      month: '2025-02',
+      before: 99900,
+      after: 0,
+    });
+  });
+
+  it('writes nothing on a second run or a dry run', async () => {
+    await useTrackingBudget();
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+
+    const preview = await syncBudget({ dryRun: true });
+    expect(preview.changes.length).toBeGreaterThan(0);
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(0);
+
+    await syncBudget();
+    const again = await syncBudget();
+    expect(again.changes).toEqual([]);
+    expect(again.unchanged).toBe(13);
+  });
+
+  it('follows a new share price', async () => {
+    await useTrackingBudget();
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+    await syncBudget();
+
+    await setPrice({ ticker: 'ABCD', price: 20000 });
+    await syncBudget();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(100000);
+  });
+
+  it('leaves months with an unpriced vest alone', async () => {
+    await useTrackingBudget();
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+    await setBudget({ category: categoryId, month: '2025-04', amount: 12300 });
+
+    const result = await syncBudget();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(12300);
+    expect(result.unpriced).toContainEqual({
+      category: categoryId,
+      month: '2025-04',
+      ticker: 'ABCD',
+    });
+  });
+
+  it('ignores grants whose category is not an income category', async () => {
+    await useTrackingBudget();
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    const groupId = await db.insertCategoryGroup({ name: 'Spending' });
+    const expenseId = await db.insertCategory({
+      name: 'Groceries',
+      cat_group: groupId,
+    });
+    const grantId = await createGrant({
+      grant: baseGrant({ category: expenseId }),
+      events: futureEvents,
+    });
+
+    const result = await syncBudget();
+    expect(result.ignoredGrants).toEqual([grantId]);
+    expect(result.changes).toEqual([]);
+    expect(getBudget({ category: expenseId, month: '2025-04' })).toBe(0);
+  });
+
+  it('does nothing in an envelope budget', async () => {
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+
+    const result = await syncBudget();
+    expect(result.skipped).toBe('envelope-budget');
+    expect(result.changes).toEqual([]);
+  });
+
+  it('is turned on by a synced preference', async () => {
+    expect(isBudgetSyncEnabled()).toBe(false);
+    await db.update('preferences', { id: 'rsu-budget-sync', value: 'true' });
+    expect(isBudgetSyncEnabled()).toBe(true);
+  });
+});
+
+describe('daily RSU refresh', () => {
+  async function emitSyncAndWait() {
+    app.events.emit('sync', { type: 'success', tables: [] });
+    // Mutators run one at a time, so this resolves after the hook's work.
+    await runMutator(() => Promise.resolve());
+  }
+
+  beforeEach(async () => {
+    await prefs.loadPrefs();
+    await db.update('preferences', { id: 'budgetType', value: 'tracking' });
+    // No server, so the hook skips prices and only rebudgets.
+    setServer(null as unknown as string);
+    await setPrice({ ticker: 'ABCD', price: 10000 });
+    await createGrant({ grant: baseGrant(), events: futureEvents });
+  });
+
+  afterEach(() => {
+    prefs.unloadPrefs();
+  });
+
+  it('rebudgets once a day when turned on', async () => {
+    await db.update('preferences', { id: 'rsu-budget-sync', value: 'true' });
+
+    await emitSyncAndWait();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(50000);
+    expect(prefs.getPrefs().lastRsuBudgetSync).toBe(TODAY);
+
+    // Later syncs the same day leave the budget alone.
+    await setBudget({ category: categoryId, month: '2025-04', amount: 1 });
+    await emitSyncAndWait();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(1);
+
+    // The next day it runs again.
+    vi.mocked(monthUtils.currentDay).mockReturnValue('2025-01-11');
+    await emitSyncAndWait();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(50000);
+  });
+
+  it('leaves the budget alone when turned off', async () => {
+    await emitSyncAndWait();
+    expect(getBudget({ category: categoryId, month: '2025-04' })).toBe(0);
+    expect(prefs.getPrefs().lastRsuBudgetSync).toBeUndefined();
   });
 });

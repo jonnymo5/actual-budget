@@ -15,6 +15,7 @@ import { pushModal } from '#modals/modalsSlice';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 
+import { RsuBudgetSync } from './RsuBudgetSync';
 import { RsuGrantsTable } from './RsuGrantsTable';
 import type { RsuGrantAction } from './RsuGrantsTable';
 import { RsuYearGrid } from './RsuYearGrid';
@@ -78,6 +79,7 @@ export function RsuPage() {
     <ErrorBoundary FallbackComponent={FeatureErrorFallback}>
       <Page header={t('RSU Grants')}>
         <StockPriceStrip grants={grants} priceByTicker={priceByTicker} />
+        <RsuBudgetSync hasGrants={grants.length > 0} />
 
         <View
           style={{
