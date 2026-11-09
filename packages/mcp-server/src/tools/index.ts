@@ -12,8 +12,10 @@ import { updateTransaction } from './categorize/update-transaction';
 import { importTransactions } from './import/import-transactions';
 import { parseOfx } from './import/parse-ofx';
 import { reconcileAccountTool } from './import/reconcile-account';
+import { recordCardStatement } from './import/record-card-statement';
 import { getBudgetMonth } from './query/get-budget-month';
 import { getBudgetMonths } from './query/get-budget-months';
+import { getCardStatements } from './query/get-card-statements';
 import { getCategories } from './query/get-categories';
 import { getOverview } from './query/get-overview';
 import { getPayees } from './query/get-payees';
@@ -53,6 +55,7 @@ export const allTools: ToolDefinition[] = [
   getBudgetMonth,
   getSchedules,
   getRsuGrants,
+  getCardStatements,
   getRules,
   runQuery,
   spendingSummary,
@@ -86,4 +89,5 @@ export const allTools: ToolDefinition[] = [
   parseOfx,
   importTransactions,
   reconcileAccountTool,
+  recordCardStatement,
 ];

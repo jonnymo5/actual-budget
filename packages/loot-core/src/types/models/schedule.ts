@@ -42,6 +42,8 @@ export type ScheduleEntity = {
   _has_splits?: boolean;
   /** Set when an RSU vest event owns this schedule. */
   _rsu_vest_event?: string | null;
+  /** Set when a recorded card statement owns this schedule. */
+  _card_statement?: string | null;
 };
 
 export type DiscoverScheduleEntity = {

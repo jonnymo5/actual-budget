@@ -45,6 +45,20 @@ export type DbAccountGroup = {
   tombstone: 1 | 0;
 };
 
+export type DbCardStatement = {
+  id: string;
+  account: string;
+  pay_from: string;
+  closing_date: number | null;
+  statement_balance: number;
+  minimum_due: number | null;
+  due_date: number;
+  payment_amount: number | null;
+  schedule: string | null;
+  skipped_schedule: string | null;
+  tombstone: 1 | 0;
+};
+
 export type DbRsuGrant = {
   id: string;
   name: string;
