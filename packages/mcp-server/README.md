@@ -24,7 +24,7 @@ negative. Dates are `YYYY-MM-DD`, budget months `YYYY-MM`.
 | Schedules   | `create_schedules`, `set_schedule_category`                                                                                                                                                                                                   |
 | RSU grants  | `create_rsu_grant`, `update_rsu_grant`, `delete_rsu_grant`, `set_stock_price`, `refresh_stock_prices`, `lock_rsu_vest_prices`, `match_rsu_deposits`                                                                                           |
 | Rules       | `preview_rule`, `create_rule`, `update_rule`, `delete_rule`, `apply_rules_retroactively`                                                                                                                                                      |
-| Import      | `parse_ofx`, `import_transactions`, `reconcile_account`                                                                                                                                                                                       |
+| Import      | `parse_ofx`, `import_transactions`, `reconcile_account`, `record_card_statement`, `get_card_statements`                                                                                                                                       |
 
 CSV and PDF statements need no server-side parsing: Claude reads them itself
 and passes the rows to `import_transactions`. OFX/QFX files go through
@@ -108,6 +108,20 @@ estimates use.
   month plus every scheduled deposit tagged with that income category
   (tracking budgets only). `auto` turns the daily sync on or off. Tag a
   schedule with `create_schedules` (its `category`) or `set_schedule_category`.
+
+### Card statements
+
+Bank downloads (.qbo/.ofx) carry transactions but not the statement summary, so
+the amount each credit card will actually take next comes from the PDF
+statement instead. `record_card_statement` takes the summary box figures (new
+balance, due date, and optionally the closing date and minimum due) and turns
+each statement into a one-off schedule named `Card · <card> · <due date>` for
+the amount that will be paid, from the account the card's regular payment
+schedule pays from. That regular recurring schedule is moved past the payment,
+so `cash_flow_projection` and the Balance Forecast count it once, at its real
+amount. `payment_amount` covers a card on a fixed or minimum autopay. Once a
+payment to the card lands near the due date, the statement's schedule is marked
+done. `get_card_statements` lists what is recorded.
 
 ### Transfers
 

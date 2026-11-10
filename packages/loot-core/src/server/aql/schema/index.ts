@@ -133,6 +133,7 @@ export const schema = {
     _actions: f('json'),
     _has_splits: f('boolean'),
     _rsu_vest_event: f('id', { ref: 'rsu_vest_events' }),
+    _card_statement: f('id', { ref: 'card_statements' }),
   },
   rules: {
     id: f('id'),
@@ -223,6 +224,19 @@ export const schema = {
     latitude: f('float', { required: true }),
     longitude: f('float', { required: true }),
     created_at: f('integer', { required: true }),
+    tombstone: f('boolean'),
+  },
+  card_statements: {
+    id: f('id'),
+    account: f('id', { ref: 'accounts' }),
+    pay_from: f('id', { ref: 'accounts' }),
+    closing_date: f('date'),
+    statement_balance: f('integer'),
+    minimum_due: f('integer'),
+    due_date: f('date'),
+    payment_amount: f('integer'),
+    schedule: f('id', { ref: 'schedules' }),
+    skipped_schedule: f('id', { ref: 'schedules' }),
     tombstone: f('boolean'),
   },
   rsu_grants: {
@@ -334,6 +348,8 @@ export const schemaConfig: SchemaConfig = {
           return ['sort_order', 'id'];
         case 'schedules':
           return [{ $condition: { completed: true } }, 'next_date'];
+        case 'card_statements':
+          return ['due_date', 'id'];
         case 'rsu_grants':
           return ['grant_date', 'id'];
         case 'rsu_vest_events':
@@ -404,6 +420,11 @@ export const schemaConfig: SchemaConfig = {
           _rsu_vest_event: `(
             SELECT _rsu.id FROM rsu_vest_events _rsu
             WHERE _rsu.schedule = _.id AND _rsu.tombstone = 0
+            LIMIT 1
+          )`,
+          _card_statement: `(
+            SELECT _cs.id FROM card_statements _cs
+            WHERE _cs.schedule = _.id AND _cs.tombstone = 0
             LIMIT 1
           )`,
         });

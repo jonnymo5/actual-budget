@@ -3,6 +3,7 @@ export type * from './account-group';
 export type * from './akahu';
 export type * from './bank';
 export type * from './bank-sync';
+export type * from './card-statement';
 export type * from './category';
 export type * from './category-group';
 export type * from './dashboard';
